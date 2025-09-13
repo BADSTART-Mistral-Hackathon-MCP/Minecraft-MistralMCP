@@ -6,7 +6,6 @@ export interface ApiResponse<T = any> {
     error?: string;
 }
 
-// Bot configuration
 export interface BotConfig {
     host: string;
     port: number;
@@ -15,7 +14,6 @@ export interface BotConfig {
     version: string;
 }
 
-// Bot status information
 export interface BotStatus {
     connected: boolean;
     spawned: boolean;
@@ -31,11 +29,15 @@ export interface BotStatus {
     playersOnline?: number;
 }
 
-// API request types
 export interface MoveRequest {
     x: number;
     y: number;
     z: number;
+}
+
+export interface FollowRequest {
+    playerName: string;
+    distance?: number;
 }
 
 export interface SayRequest {
@@ -50,12 +52,4 @@ export interface MineRequest {
 export interface CraftRequest {
     item: string;
     count?: number;
-}
-
-// Inventory item
-export interface InventoryItem {
-    name: string;
-    displayName: string;
-    count: number;
-    slot: number;
 }
