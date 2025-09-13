@@ -36,8 +36,9 @@ export interface MoveRequest {
 }
 
 export interface FollowRequest {
-    playerName: string;
+    playerName?: string;
     distance?: number;
+    continuous?: boolean;
 }
 
 export interface SayRequest {
