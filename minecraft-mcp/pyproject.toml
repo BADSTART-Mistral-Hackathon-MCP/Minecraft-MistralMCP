@@ -9,5 +9,6 @@ dependencies = [
     "asyncio>=4.0.0",
     "cors>=1.0.1",
     "fastmcp>=2.12.3",
+    "python-dotenv>=1.1.1",
     "typing>=3.10.0.0",
 ]

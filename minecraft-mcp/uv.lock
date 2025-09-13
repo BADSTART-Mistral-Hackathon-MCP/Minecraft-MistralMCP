@@ -785,6 +785,10 @@ dependencies = [
     { name = "asyncio" },
     { name = "cors" },
     { name = "fastmcp" },
+<<<<<<< HEAD
+=======
+    { name = "python-dotenv" },
+>>>>>>> dd36d9a (Added minecraft-mcp)
     { name = "typing" },
 ]
 
@@ -794,6 +798,10 @@ requires-dist = [
     { name = "asyncio", specifier = ">=4.0.0" },
     { name = "cors", specifier = ">=1.0.1" },
     { name = "fastmcp", specifier = ">=2.12.3" },
+<<<<<<< HEAD
+=======
+    { name = "python-dotenv", specifier = ">=1.1.1" },
+>>>>>>> dd36d9a (Added minecraft-mcp)
     { name = "typing", specifier = ">=3.10.0.0" },
 ]
 

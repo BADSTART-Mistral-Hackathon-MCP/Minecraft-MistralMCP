@@ -4,9 +4,19 @@ import aiohttp
 import json
 from typing import Dict, Any, Optional
 from fastmcp import FastMCP
+<<<<<<< HEAD
 
 # Configuration
 BOT_API_BASE = os.environ["BOT_API_BASE", "http://localhost:3001"]
+=======
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# Configuration
+BOT_API_BASE = os.getenv("BOT_API_BASE", "http://localhost:3001")
+>>>>>>> dd36d9a (Added minecraft-mcp)
 
 # Initialize MCP server
 mcp = FastMCP("Minecraft RPG Bot")
@@ -77,7 +87,11 @@ async def bot_say(message: str) -> str:
 @mcp.tool()
 async def start_quest(quest_name: str) -> str:
     """Start a specific quest. Available quests: mineWood, mineStone, craftPickaxe, craftAxe, collectNearbyItems, checkInventory, digAround, followPlayer"""
+<<<<<<< HEAD
     result = await make_api_request("/quest", "POST", {"questName": quest_name})
+=======
+    result = await make_api_request("/bot/quest", "POST", {"questName": quest_name})
+>>>>>>> dd36d9a (Added minecraft-mcp)
     
     if result.get("success"):
         return f"🎯 Quest '{quest_name}': {result.get('message', 'Quest completed')}"
