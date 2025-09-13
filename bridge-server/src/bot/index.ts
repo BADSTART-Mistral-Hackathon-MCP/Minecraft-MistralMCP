@@ -1,6 +1,7 @@
 import mineflayer from 'mineflayer';
-import { pathfinder, Movements, goals } from 'mineflayer-pathfinder';
-import { BotConfig, BotStatus } from './types';
+import { pathfinder, goals } from 'mineflayer-pathfinder';
+import { BotConfig, BotStatus } from '../types';
+import { setupBotEvents } from './events';
 
 class MinecraftBot {
     private bot: mineflayer.Bot | null = null;
@@ -27,32 +28,24 @@ class MinecraftBot {
             password: this.config.password,
             version: this.config.version,
             auth: this.config.password ? 'microsoft' : 'offline',
-            hideErrors: false // Set to true to hide protocol errors
+            hideErrors: false
         });
 
         // Load pathfinder plugin
         this.bot.loadPlugin(pathfinder);
 
-        // Event handlers
-        this.bot.once('spawn', this.onSpawn.bind(this));
+        // Setup event handlers
+        setupBotEvents(this.bot);
+
+        // Connection event handlers
+        this.bot.once('spawn', () => {
+            this.reconnectAttempts = 0;
+            this.isReconnecting = false;
+        });
+
         this.bot.on('error', this.onError.bind(this));
         this.bot.on('end', this.onEnd.bind(this));
         this.bot.on('kicked', this.onKicked.bind(this));
-    }
-
-    private onSpawn(): void {
-        console.log('✅ Bot spawned successfully!');
-        this.reconnectAttempts = 0;
-        this.isReconnecting = false;
-
-        if (this.bot) {
-            // Initialize pathfinder movements
-            const defaultMove = new Movements(this.bot);
-            this.bot.pathfinder.setMovements(defaultMove);
-
-            console.log(`📊 Health: ${this.bot.health}, Food: ${this.bot.food}`);
-            console.log(`📍 Position: (${this.bot.entity.position.x.toFixed(1)}, ${this.bot.entity.position.y.toFixed(1)}, ${this.bot.entity.position.z.toFixed(1)})`);
-        }
     }
 
     private onError(err: Error): void {
@@ -88,7 +81,7 @@ class MinecraftBot {
         }, 5000);
     }
 
-    // Public methods for API
+    // Public methods
     public isReady(): boolean {
         return !!(this.bot && this.bot.entity && !this.bot._client.ended);
     }
@@ -119,7 +112,7 @@ class MinecraftBot {
             throw new Error('Bot is not ready');
         }
 
-        const bot = this.bot; // Capture reference to avoid null checking issues
+        const bot = this.bot;
 
         return new Promise((resolve, reject) => {
             const goal = new goals.GoalBlock(x, y, z);
@@ -150,6 +143,57 @@ class MinecraftBot {
             bot.once('goal_reached', onGoalReached);
             bot.once('path_update', onPathUpdate);
         });
+    }
+
+    public followPlayer(playerName: string, distance = 3): string {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+
+        const player = this.bot.players[playerName];
+        if (!player || !player.entity) {
+            throw new Error(`Player ${playerName} not found or not visible`);
+        }
+
+        // Use GoalFollow to follow the player
+        const goal = new goals.GoalFollow(player.entity, distance);
+        this.bot.pathfinder.setGoal(goal);
+
+        return `Following ${playerName} at ${distance} blocks distance`;
+    }
+
+    public stopMovement(): string {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+
+        this.bot.pathfinder.setGoal(null);
+
+        // Also stop any control states that might be active
+        this.bot.setControlState('forward', false);
+        this.bot.setControlState('back', false);
+        this.bot.setControlState('left', false);
+        this.bot.setControlState('right', false);
+        this.bot.setControlState('jump', false);
+        this.bot.setControlState('sprint', false);
+        this.bot.setControlState('sneak', false);
+
+        return 'Bot movement stopped';
+    }
+
+    public getPosition() {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+
+        const pos = this.bot.entity.position;
+        return {
+            x: Math.round(pos.x * 100) / 100,
+            y: Math.round(pos.y * 100) / 100,
+            z: Math.round(pos.z * 100) / 100,
+            yaw: Math.round(this.bot.entity.yaw * 100) / 100,
+            pitch: Math.round(this.bot.entity.pitch * 100) / 100
+        };
     }
 
     public say(message: string): void {
