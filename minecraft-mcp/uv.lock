@@ -786,9 +786,15 @@ dependencies = [
     { name = "cors" },
     { name = "fastmcp" },
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     { name = "python-dotenv" },
 >>>>>>> dd36d9a (Added minecraft-mcp)
+=======
+    { name = "python-dotenv" },
+=======
+>>>>>>> a982a55 (Created project mcp with Python)
+>>>>>>> e2153dc (Created project mcp with Python)
     { name = "typing" },
 ]
 
@@ -799,9 +805,15 @@ requires-dist = [
     { name = "cors", specifier = ">=1.0.1" },
     { name = "fastmcp", specifier = ">=2.12.3" },
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     { name = "python-dotenv", specifier = ">=1.1.1" },
 >>>>>>> dd36d9a (Added minecraft-mcp)
+=======
+    { name = "python-dotenv", specifier = ">=1.1.1" },
+=======
+>>>>>>> a982a55 (Created project mcp with Python)
+>>>>>>> e2153dc (Created project mcp with Python)
     { name = "typing", specifier = ">=3.10.0.0" },
 ]
 
