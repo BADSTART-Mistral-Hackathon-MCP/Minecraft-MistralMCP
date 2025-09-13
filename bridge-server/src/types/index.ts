@@ -9,9 +9,11 @@ export interface ApiResponse<T = any> {
 export interface BotConfig {
     host: string;
     port: number;
-    username: string;
-    password?: string;
+    username: string; // used in offline mode
     version: string;
+    auth: 'offline' | 'microsoft';
+    email?: string;   // optional Microsoft account email for MS auth
+    profilesDir?: string; // token cache directory for MS auth
 }
 
 export interface BotStatus {

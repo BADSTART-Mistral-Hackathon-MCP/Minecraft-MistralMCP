@@ -13,9 +13,11 @@ dotenv.config();
 const botConfig: BotConfig = {
     host: process.env.MC_HOST || 'localhost',
     port: parseInt(process.env.MC_PORT || '25565'),
-    username: process.env.MC_USERNAME || 'BridgeBot',
-    password: process.env.MC_PASSWORD,
-    version: process.env.MC_VERSION || '1.21.1'
+    username: process.env.MC_USERNAME || 'BridgeBot', // used in offline mode
+    version: process.env.MC_VERSION || '1.21.1',
+    auth: (process.env.MC_AUTH === 'microsoft' ? 'microsoft' : 'offline'),
+    email: process.env.MC_EMAIL,
+    profilesDir: process.env.MC_PROFILES_DIR
 };
 
 // Server configuration

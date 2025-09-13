@@ -31,12 +31,21 @@ npm start
 Edit `.env` file:
 
 ```env
-PORT=3001                    # Bridge server port
-MC_HOST=localhost            # Minecraft server host
-MC_PORT=25565               # Minecraft server port
-MC_USERNAME=BridgeBot       # Bot username
-MC_PASSWORD=your_password   # Microsoft account password (optional)
-MC_VERSION=1.21.1           # Minecraft version
+PORT=3001                         # Bridge server port
+MC_HOST=localhost                 # Minecraft server host
+MC_PORT=25565                     # Minecraft server port
+MC_VERSION=1.21.1                 # Minecraft version
+
+# Auth mode: 'offline' (local dev server) or 'microsoft' (online)
+MC_AUTH=offline
+
+# Offline auth username used in-game
+MC_USERNAME=BridgeBot
+
+# For Microsoft auth, optional Microsoft account email (no password required)
+# MC_EMAIL=you@example.com
+# Optional token cache dir (created automatically)
+# MC_PROFILES_DIR=.minecraft-profiles
 ```
 
 ## API Endpoints
@@ -49,13 +58,13 @@ Returns server and bot connection status.
 
 ### Bot Status
 ```http
-GET /status
+GET /bot/status
 ```
 Returns detailed bot information (health, position, inventory count, etc.).
 
 ### Move Bot
 ```http
-POST /move
+POST /movement/moveTo
 Content-Type: application/json
 
 {
@@ -67,7 +76,7 @@ Content-Type: application/json
 
 ### Make Bot Speak
 ```http
-POST /say
+POST /chat/say
 Content-Type: application/json
 
 {
@@ -77,7 +86,7 @@ Content-Type: application/json
 
 ### Mine Blocks
 ```http
-POST /mine
+POST /mining/block
 Content-Type: application/json
 
 {
@@ -88,7 +97,7 @@ Content-Type: application/json
 
 ### Craft Items
 ```http
-POST /craft
+POST /crafting/item
 Content-Type: application/json
 
 {
@@ -102,6 +111,20 @@ Content-Type: application/json
 GET /inventory
 ```
 Returns bot's current inventory contents.
+
+## Microsoft Account Login
+
+Set `MC_AUTH=microsoft` in `.env`. On first run, the server prints a device code to authenticate:
+
+1. Start the server (`npm run dev` or `npm start`).
+2. In the logs, follow the instructions:
+   - Open the verification URL (usually `https://www.microsoft.com/link`).
+   - Enter the displayed code.
+3. Tokens are cached in `.minecraft-profiles/` (or `MC_PROFILES_DIR`) so next runs won’t require login.
+
+Notes:
+- No password is used with Microsoft login (OAuth device code flow).
+- Optionally set `MC_EMAIL` to hint the account that should be used.
 
 ## Response Format
 

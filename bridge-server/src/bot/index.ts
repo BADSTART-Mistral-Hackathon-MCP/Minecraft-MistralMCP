@@ -2,6 +2,7 @@ import mineflayer from 'mineflayer';
 import { pathfinder, goals } from 'mineflayer-pathfinder';
 import { BotConfig, BotStatus } from '../types';
 import { setupBotEvents } from './events';
+import path from 'path';
 
 class MinecraftBot {
     private bot: mineflayer.Bot | null = null;
@@ -24,11 +25,21 @@ class MinecraftBot {
         this.bot = mineflayer.createBot({
             host: this.config.host,
             port: this.config.port,
-            username: this.config.username,
-            password: this.config.password,
+            // For microsoft auth, email is optional; device code flow will select the account.
+            username: this.config.auth === 'microsoft' ? (this.config.email || this.config.username) : this.config.username,
             version: this.config.version,
-            auth: this.config.password ? 'microsoft' : 'offline',
-            hideErrors: false
+            auth: this.config.auth,
+            hideErrors: false,
+            // Cache tokens so next runs don't require re-login
+            profilesFolder: this.config.profilesDir || path.join(process.cwd(), '.minecraft-profiles'),
+            // Show device code for Microsoft login on first run
+            onMsaCode: (data: any) => {
+                const minutes = Math.ceil((data.expires_in || 0) / 60);
+                console.log('Microsoft login required.');
+                console.log(`1) Ouvrez: ${data.verification_uri || 'https://www.microsoft.com/link'}`);
+                console.log(`2) Entrez le code: ${data.user_code}`);
+                if (minutes) console.log(`(Code valide ~${minutes} min)`);
+            }
         });
 
         // Load pathfinder plugin
