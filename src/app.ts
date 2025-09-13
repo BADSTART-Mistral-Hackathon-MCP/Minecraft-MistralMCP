@@ -1,5 +1,6 @@
 import { FastMCP } from "fastmcp";
 import { bot } from "./bot";
+import { quests } from "./quest";
 import { z } from "zod";
 
 const server = new FastMCP({
@@ -42,13 +43,35 @@ server.addTool({
 
 server.addTool({
     name: "quest",
-    description: "Send a quest to the bot",
+    description: "Start a quest",
     parameters: z.object({
-        quest: z.string().describe("Quest description")
+        quest: z.string().describe("Quest to start")
     }),
     execute: async ({ quest }: { quest: string }) => {
-        bot.chat(`I received a quest: ${quest}`);
-        return `Quest "${quest}" assigned to bot`;
+        const questFunction = quests[quest];
+        if (questFunction) {
+            return await questFunction();
+        } else {
+            // Handle the case when the quest is not found
+            return "Quest not found";
+        }
+    },
+})
+
+
+
+server.addTool({
+    name: "coucou",
+    description: "Bot dit 'coucou' et s'accroupit trois fois",
+    parameters: z.object({}),
+    execute: async () => {
+        bot.chat("coucou");
+        for (let i = 0; i < 3; i++) {
+            bot.setControlState("sneak", true);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            bot.setControlState("sneak", false);
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
     }
 });
 

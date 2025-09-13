@@ -12,15 +12,17 @@
   "type": "module",
   "main": "./src/app.ts",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
+    "dev": "tsx watch src/app.ts",
     "start": "node dist/app.js",
     "build": "tsc",
     "test": ""
   },
   "dependencies": {
     "fastmcp": "^3.17.0",
+    "minecraft-data": "^3.98.0",
     "mineflayer": "^4.33.0",
-    "mineflayer-pathfinder": "^2.4.5"
+    "mineflayer-pathfinder": "^2.4.5",
+    "mineflayer-tool": "^1.2.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
