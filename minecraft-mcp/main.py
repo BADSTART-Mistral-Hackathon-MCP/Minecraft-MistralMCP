@@ -4,6 +4,7 @@ import aiohttp
 import json
 from typing import Dict, Any, Optional, List
 from fastmcp import FastMCP
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
 
@@ -14,6 +15,13 @@ BOT_API_BASE = os.getenv("BOT_API_BASE", "http://localhost:3001")
 
 # Initialize MCP server
 mcp = FastMCP("Minecraft RPG Bot")
+
+with open("mcp.json", "r", encoding="utf-8") as f:
+    mcp_template = json.load(f)
+
+@mcp.get("/capabilities")
+async def get_capabilities():
+    return JSONResponse(content=mcp_template)
 
 async def make_api_request(endpoint: str, method: str = "GET", data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Make HTTP request to bot API"""
@@ -97,15 +105,34 @@ async def move_bot(x: float, y: float, z: float) -> str:
         return f"❌ Movement failed: {result.get('error', 'Unknown error')}"
 
 @mcp.tool()
-async def follow_player(player_name: str, distance: float = 3.0) -> str:
-    """Make bot follow a specific player"""
+async def follow_player(player_name: str = "", distance: float = 3.0, continuous: bool = False) -> str:
+    """Make bot follow a specific player. If no player_name provided, follows nearest player"""
     result = await make_api_request("/movement/follow", "POST", {
-        "playerName": player_name, 
-        "distance": distance
+        "playerName": player_name,
+        "distance": distance,
+        "continuous": continuous
     })
     
     if result.get("success"):
-        return f"✅ {result.get('message', 'Following player')}"
+        message = result.get('message', 'Following player')
+        if not player_name.strip():
+            return f"✅ {message} (auto-selected nearest player)"
+        else:
+            return f"✅ {message}"
+    else:
+        return f"❌ Follow failed: {result.get('error', 'Unknown error')}"
+
+@mcp.tool()
+async def follow_nearest_player(distance: float = 3.0, continuous: bool = False) -> str:
+    """Make bot follow the nearest available player automatically"""
+    result = await make_api_request("/movement/follow", "POST", {
+        "playerName": "",  # Empty string triggers nearest player selection
+        "distance": distance,
+        "continuous": continuous
+    })
+    
+    if result.get("success"):
+        return f"✅ {result.get('message', 'Following nearest player')}"
     else:
         return f"❌ Follow failed: {result.get('error', 'Unknown error')}"
 
