@@ -2,6 +2,7 @@ import mineflayer from 'mineflayer';
 import { pathfinder, goals } from 'mineflayer-pathfinder';
 import { BotConfig, BotStatus } from '../types';
 import { setupBotEvents } from './events';
+import { Block } from 'prismarine-block';
 
 class MinecraftBot {
     private bot: mineflayer.Bot | null = null;
@@ -250,16 +251,101 @@ class MinecraftBot {
 
         const item = this.bot.registry.itemsByName[itemName];
         if (!item) {
-            throw new Error(`Item ${itemName} not found`);
+            const msg = `❌ Item "${itemName}" not found.`;
+            this.bot.chat(msg);
+            return msg;
         }
 
-        const recipe = this.bot.recipesFor(item.id, null, count, null)[0];
+        let recipe = this.bot.recipesFor(item.id, null, count, false)[0];
+        let craftingTable: Block | null = null;
+
+        // If no recipe in 2x2 grid, try with a crafting table
         if (!recipe) {
-            throw new Error(`No recipe found for ${itemName}`);
+            craftingTable = this.bot.findBlock({
+                matching: this.bot.registry.blocksByName.crafting_table.id,
+                maxDistance: 10
+            });
+
+            if (!craftingTable) {
+                const msg = `❌ No recipe for "${itemName}" in inventory, and no crafting table nearby.`;
+                this.bot.chat(msg);
+                return msg;
+            }
+
+            recipe = this.bot.recipesFor(item.id, null, null, true)[0];
+
+            if (!recipe) {
+                const msg = `❌ Even with a crafting table, no recipe found for "${itemName}".`;
+                this.bot.chat(msg);
+                return msg;
+            }
+
+            // Move to the crafting table if required
+            try {
+                const { GoalNear } = goals;
+                await this.bot.pathfinder.goto(
+                    new GoalNear(
+                        craftingTable.position.x,
+                        craftingTable.position.y,
+                        craftingTable.position.z,
+                        1
+                    )
+                );
+            } catch {
+                const msg = `❌ Cannot reach the crafting table to craft "${itemName}".`;
+                this.bot.chat(msg);
+                return msg;
+            }
         }
 
-        await this.bot.craft(recipe, count);
-        return `Crafted ${count}x ${itemName}`;
+        // Check if we have all ingredients
+        const missing: string[] = [];
+        console.log('Recipe ingredients:', recipe);
+        for (const ing of recipe.delta) {
+            const needed = - ing.count;
+            const have = this.bot.inventory.count(ing.id, null);
+            if (have < needed) {
+                const ingName = this.bot.registry.items[ing.id].name;
+                missing.push(`${needed - have}x ${ingName}`);
+            }
+        }
+
+        if (missing.length > 0) {
+            const msg = `❌ Cannot craft "${itemName}". Missing: ${missing.join(', ')}`;
+            this.bot.chat(msg);
+            return msg;
+        }
+
+        try {
+            await this.bot.craft(recipe, count, craftingTable ?? undefined);
+            const msg = `✅ Crafted ${count}x ${itemName}.`;
+            this.bot.chat(msg);
+            return msg;
+        } catch (err) {
+            const msg = `❌ Failed to craft "${itemName}": ${(err as Error).message}`;
+            this.bot.chat(msg);
+            return msg;
+        }
+    }
+
+    public dropItem(itemName: string, count = 1): string {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+
+        const item = this.bot.registry.itemsByName[itemName];
+        if (!item) {
+            throw new Error(`Item "${itemName}" not found`);
+        }
+
+        const heldItem = this.bot.inventory.findInventoryItem(item.id, null, false);
+        if (!heldItem) {
+            throw new Error(`You do not have any "${itemName}" to drop`);
+        }
+
+        const toDrop = Math.min(count, heldItem.count);
+        this.bot.toss(heldItem.type, null, toDrop);
+        return `Dropped ${toDrop}x ${itemName}`;
     }
 
     public getInventory() {

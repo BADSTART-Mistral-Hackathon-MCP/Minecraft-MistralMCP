@@ -53,6 +53,7 @@ app.listen(serverPort, () => {
     console.log('  POST /mining/block       - Mine specific blocks');
     console.log('  POST /crafting/item      - Craft items');
     console.log('  GET  /inventory          - Get bot inventory');
+    console.log('  POST /inventory/drop     - Drop items from inventory');
 });
 
 // Graceful shutdown
