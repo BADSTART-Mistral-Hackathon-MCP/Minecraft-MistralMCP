@@ -162,6 +162,7 @@ class MinecraftBot {
         // Use GoalFollow to follow the player
         const goal = new goals.GoalFollow(player.entity, distance);
         this.bot.pathfinder.setGoal(goal, continuous);
+        this.bot.pathfinder.setGoal(goal, true);
 
         return `Following ${playerName} at ${distance} blocks distance`;
     }
@@ -205,6 +206,79 @@ class MinecraftBot {
             throw new Error('Bot is not ready');
         }
         this.bot.chat(message);
+    }
+
+    public async runCommand(command: string, timeoutMs = 3000): Promise<{ ok: boolean; output: string[] }> {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+
+        const bot = this.bot;
+        const output: string[] = [];
+        const onMessage = (jsonMsg: any) => {
+            try {
+                const text = (jsonMsg && typeof jsonMsg.toString === 'function') ? jsonMsg.toString() : String(jsonMsg || '');
+                if (text) output.push(text);
+            } catch { }
+        };
+
+        bot.on('message', onMessage);
+        try {
+            bot.chat(command.startsWith('/') ? command : `/${command}`);
+            await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+        } finally {
+            bot.removeListener('message', onMessage);
+        }
+
+        const lower = output.join('\n').toLowerCase();
+        const success = lower.includes('gave') || lower.includes('donne') || lower.includes('a donné');
+        const permissionError = lower.includes('permission') || lower.includes("n'avez pas la permission") || lower.includes('no tienes permiso');
+        const unknown = lower.includes('unknown') || lower.includes('incomplete') || lower.includes('inconnu');
+        const playerMissing = lower.includes('does not exist') || lower.includes('not found') || lower.includes('aucun joueur');
+
+        const ok = success && !permissionError && !unknown && !playerMissing;
+        return { ok, output };
+    }
+
+    public async giveEmeralds(playerName: string, amount = 10): Promise<boolean> {
+        const { ok } = await this.runCommand(`/give ${playerName} minecraft:emerald ${amount}`);
+        return ok;
+    }
+
+    public async giveItem(
+        playerName: string,
+        itemId: string,
+        count: number,
+        enchants?: Array<{ id: string; level: number }>,
+        timeoutMs = 4000
+    ): Promise<{ ok: boolean; command: string; output: string[] }> {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+
+        const normCount = Math.max(1, Math.min(64, Math.floor(count || 1)));
+        let id = (itemId || '').trim().toLowerCase();
+        if (!id) throw new Error('Invalid item id');
+        if (!id.includes(':')) id = `minecraft:${id}`;
+
+        let nbt = '';
+        if (enchants && enchants.length > 0) {
+            const parts = enchants
+                .filter(e => e && e.id && e.level && e.level > 0)
+                .map(e => {
+                    let eid = e.id.toLowerCase();
+                    if (!eid.includes(':')) eid = `minecraft:${eid}`;
+                    const lvl = Math.max(1, Math.min(255, Math.floor(e.level)));
+                    return `{id:"${eid}",lvl:${lvl}s}`;
+                });
+            if (parts.length > 0) {
+                nbt = `{Enchantments:[${parts.join(',')}]} `;
+            }
+        }
+
+        const cmd = `/give ${playerName} ${id} ${normCount} ${nbt}`.trim();
+        const res = await this.runCommand(cmd, timeoutMs);
+        return { ok: res.ok, command: cmd, output: res.output };
     }
 
     public async mine(blockType: string, maxDistance = 32): Promise<string> {
@@ -253,12 +327,16 @@ class MinecraftBot {
             throw new Error(`Item ${itemName} not found`);
         }
 
-        const recipe = this.bot.recipesFor(item.id, null, count, null)[0];
+        // Find any recipe that produces the item (at least 1 per craft)
+        const recipe = this.bot.recipesFor(item.id, null, 1, null)[0];
         if (!recipe) {
             throw new Error(`No recipe found for ${itemName}`);
         }
 
-        await this.bot.craft(recipe, count);
+        const perCraft = (recipe as any).result?.count ?? 1;
+        const times = Math.max(1, Math.ceil(count / perCraft));
+
+        await this.bot.craft(recipe, times);
         return `Crafted ${count}x ${itemName}`;
     }
 
@@ -274,6 +352,40 @@ class MinecraftBot {
             count: item.count,
             slot: item.slot
         }));
+    }
+
+    public async removePlanks(count: number): Promise<number> {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+        if (count <= 0) return 0;
+
+        let remaining = count;
+        // Work on a snapshot to avoid re-reading while tossing
+        const stacks = this.bot.inventory.items().filter(i => i.name.toLowerCase().includes('planks'));
+        for (const it of stacks) {
+            if (remaining <= 0) break;
+            const remove = Math.min(remaining, it.count || 0);
+            if (remove <= 0) continue;
+            try {
+                // Prefer /clear if we have permission (deletes instead of dropping)
+                const id = `minecraft:${it.name}`;
+                try {
+                    const result = await this.runCommand(`/clear @s ${id} ${remove}`, 1200);
+                    if (result.ok) {
+                        remaining -= remove;
+                        continue;
+                    }
+                } catch { }
+                // Fallback to tossing the items (drops them to the ground)
+                await this.bot.toss(it.type, null as any, remove);
+                remaining -= remove;
+            } catch (e) {
+                // If toss fails, skip this stack and continue
+                continue;
+            }
+        }
+        return count - remaining;
     }
 }
 

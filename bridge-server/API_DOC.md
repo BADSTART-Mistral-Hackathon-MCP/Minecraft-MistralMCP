@@ -113,6 +113,44 @@
 - **Response:** Position object.
 
 ---
+### GET /give
+- Description: Give items to a player via server command (requires bot to be OP). Supports optional enchantments for tools.
+- Query Params:
+  - `player`: string (required) — target player name
+  - `item`: string (required) — item id or short name (e.g., `diamond_sword` or `minecraft:diamond_sword`)
+  - `count`: number (optional) — 1..64, defaults to 1
+  - `enchant`: string[] (optional, repeatable) — enchantments as `id:level` (e.g., `sharpness:5`, `minecraft:unbreaking:3`)
+- Response: Details of the command and server output
+
+Examples:
+```
+GET /crafting/give?player=Alex&item=diamond_sword&count=1&enchant=sharpness:5&enchant=unbreaking:3
+GET /crafting/give?player=Alex&item=minecraft:emerald&count=10
+```
+
+---
+
+## /quest
+### POST /
+- Description: Activate the planks quest (default target 8). Keeps running until the bot has gained at least the target number of wooden planks since activation. Sends a chat message on start and "Bravo" on completion. Rewards the specified player with 10 emeralds via `/give` when completed (bot must be op).
+  Upon completion, the quest consumes up to the target number of planks gained since activation from the bot inventory (planks only).
+- Request Body:
+  ```json
+  {
+    "target": 8,            // Optional, default 8
+    "assistCrafting": true, // Optional, default true; bot tries crafting planks from logs if possible
+    "playerName": "YourName" // Required, player to reward with emeralds on success
+  }
+  ```
+- Response: Current quest status.
+
+### GET /status
+- Description: Get current quest status (active, baseline, current, gained, target, completed).
+
+### POST /stop
+- Description: Stop the quest monitoring loop and reset active state.
+
+---
 
 ## Notes
 - All endpoints return a standard response format with success/error and message.

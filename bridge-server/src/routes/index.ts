@@ -7,6 +7,7 @@ import { createChatRoutes } from './chat';
 import { createMiningRoutes } from './mining';
 import { createCraftingRoutes } from './crafting';
 import { createInventoryRoutes } from './inventory';
+import { createQuestRoutes } from './quest';
 
 export function setupRoutes(app: Express, bot: MinecraftBot): void {
     // Health routes
@@ -21,4 +22,5 @@ export function setupRoutes(app: Express, bot: MinecraftBot): void {
     app.use('/mining', createMiningRoutes(bot));
     app.use('/crafting', createCraftingRoutes(bot));
     app.use('/inventory', createInventoryRoutes(bot));
+    app.use('/quest', createQuestRoutes(bot));
 }
