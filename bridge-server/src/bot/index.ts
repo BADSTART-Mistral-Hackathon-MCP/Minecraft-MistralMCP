@@ -348,6 +348,20 @@ class MinecraftBot {
         return `Dropped ${toDrop}x ${itemName}`;
     }
 
+    public lookAtPlayer(playerName: string): string {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+
+        const player = this.bot.players[playerName];
+        if (!player || !player.entity) {
+            throw new Error(`Player ${playerName} not found or not visible`);
+        }
+
+        this.bot.lookAt(player.entity.position.offset(0, player.entity.height, 0));
+        return `Looking at ${playerName}`;
+    }
+
     public getInventory() {
         if (!this.isReady() || !this.bot) {
             throw new Error('Bot is not ready');

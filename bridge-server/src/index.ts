@@ -54,6 +54,7 @@ app.listen(serverPort, () => {
     console.log('  POST /crafting/item      - Craft items');
     console.log('  GET  /inventory          - Get bot inventory');
     console.log('  POST /inventory/drop     - Drop items from inventory');
+    console.log('  POST /movement/lookAtPlayer - Look at a player');
 });
 
 // Graceful shutdown
