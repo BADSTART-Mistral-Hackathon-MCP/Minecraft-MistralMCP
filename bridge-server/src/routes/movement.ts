@@ -78,5 +78,19 @@ export function createMovementRoutes(bot: MinecraftBot): Router {
         }
     });
 
+    router.post('/lookAtPlayer', requireBot(bot), (req, res) => {
+        const { playerName } = req.body;
+        if (typeof playerName !== 'string' || !playerName.trim()) {
+            return ResponseHelper.badRequest(res, 'Player name must be a non-empty string');
+        }
+
+        try {
+            const result = bot.lookAtPlayer(playerName);
+            ResponseHelper.success(res, undefined, result);
+        } catch (error) {
+            ResponseHelper.error(res, error instanceof Error ? error.message : 'Look at player failed');
+        }
+    });
+
     return router;
 }
