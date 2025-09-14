@@ -12,10 +12,10 @@ dotenv.config();
 // Bot configuration
 const botConfig: BotConfig = {
     host: process.env.MC_HOST || 'localhost',
-    port: parseInt(process.env.MC_PORT || '25565'),
+    port: parseInt(process.env.MC_PORT || '64438'),
     username: process.env.MC_USERNAME || 'BridgeBot',
     password: process.env.MC_PASSWORD,
-    version: process.env.MC_VERSION || '1.21.1'
+    version: process.env.MC_VERSION || '1.21',
 };
 
 // Server configuration
@@ -52,7 +52,11 @@ app.listen(serverPort, () => {
     console.log('  POST /chat/say           - Make bot speak');
     console.log('  POST /mining/block       - Mine specific blocks');
     console.log('  POST /crafting/item      - Craft items');
+    console.log('  GET  /crafting/give      - Give items (query params)');
     console.log('  GET  /inventory          - Get bot inventory');
+    console.log('  POST /quest              - Start planks quest');
+    console.log('  GET  /quest/status       - Planks quest status');
+    console.log('  POST /quest/stop         - Stop planks quest');
 });
 
 // Graceful shutdown
