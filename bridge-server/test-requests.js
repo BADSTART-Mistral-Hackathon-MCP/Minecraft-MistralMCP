@@ -56,7 +56,7 @@ async function testHealth() {
 async function testStatus() {
     console.log('\n📊 Testing /status endpoint...');
     try {
-        const response = await makeRequest('GET', '/status');
+        const response = await makeRequest('GET', '/bot/status');
         console.log(`Status: ${response.status}`);
         console.log('Response:', JSON.stringify(response.data, null, 2));
     } catch (error) {
@@ -67,7 +67,7 @@ async function testStatus() {
 async function testSay() {
     console.log('\n💬 Testing /say endpoint...');
     try {
-        const response = await makeRequest('POST', '/say', {
+        const response = await makeRequest('POST', '/chat/say', {
             message: 'Hello from test script!'
         });
         console.log(`Status: ${response.status}`);
@@ -80,7 +80,7 @@ async function testSay() {
 async function testMove() {
     console.log('\n🚶 Testing /move endpoint...');
     try {
-        const response = await makeRequest('POST', '/move', {
+        const response = await makeRequest('POST', '/movement/moveTo', {
             x: 10,
             y: 64,
             z: 10
@@ -106,7 +106,7 @@ async function testInventory() {
 async function testMine() {
     console.log('\n⛏️ Testing /mine endpoint...');
     try {
-        const response = await makeRequest('POST', '/mine', {
+        const response = await makeRequest('POST', '/mining/block', {
             blockType: 'stone',
             maxDistance: 32
         });
@@ -120,12 +120,36 @@ async function testMine() {
 async function testCraft() {
     console.log('\n🔨 Testing /craft endpoint...');
     try {
-        const response = await makeRequest('POST', '/craft', {
+        const response = await makeRequest('POST', '/crafting/item', {
             item: 'stick',
             count: 4
         });
         console.log(`Status: ${response.status}`);
         console.log('Response:', JSON.stringify(response.data, null, 2));
+    } catch (error) {
+        console.error('Error:', error.message);
+    }
+}
+
+async function testGive() {
+    console.log('\n🎁 Testing /crafting/give endpoint...');
+    try {
+        const response = await makeRequest('GET', '/crafting/give?player=Player&item=emerald&count=5');
+        console.log(`Status: ${response.status}`);
+        console.log('Response:', JSON.stringify(response.data, null, 2));
+    } catch (error) {
+        console.error('Error:', error.message);
+    }
+}
+async function testQuest() {
+    console.log('\n🧩 Testing /quest endpoint...');
+    try {
+        const start = await makeRequest('POST', '/quest', { target: 8, assistCrafting: true, playerName: 'Player' });
+        console.log(`Start Status: ${start.status}`);
+        console.log('Start Response:', JSON.stringify(start.data, null, 2));
+        const status = await makeRequest('GET', '/quest/status');
+        console.log(`Status: ${status.status}`);
+        console.log('Quest Status:', JSON.stringify(status.data, null, 2));
     } catch (error) {
         console.error('Error:', error.message);
     }
@@ -160,6 +184,8 @@ async function runTests() {
     await testMove();
     await testMine();
     await testCraft();
+    await testGive();
+    await testQuest();
 
     console.log('\n✅ All tests completed!');
     console.log('\nNotes:');

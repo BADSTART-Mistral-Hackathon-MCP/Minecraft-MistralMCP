@@ -49,13 +49,13 @@ Returns server and bot connection status.
 
 ### Bot Status
 ```http
-GET /status
+GET /bot/status
 ```
 Returns detailed bot information (health, position, inventory count, etc.).
 
 ### Move Bot
 ```http
-POST /move
+POST /movement/moveTo
 Content-Type: application/json
 
 {
@@ -67,7 +67,7 @@ Content-Type: application/json
 
 ### Make Bot Speak
 ```http
-POST /say
+POST /chat/say
 Content-Type: application/json
 
 {
@@ -77,7 +77,7 @@ Content-Type: application/json
 
 ### Mine Blocks
 ```http
-POST /mine
+POST /mining/block
 Content-Type: application/json
 
 {
@@ -88,7 +88,7 @@ Content-Type: application/json
 
 ### Craft Items
 ```http
-POST /craft
+POST /crafting/item
 Content-Type: application/json
 
 {
@@ -102,6 +102,39 @@ Content-Type: application/json
 GET /inventory
 ```
 Returns bot's current inventory contents.
+
+### Give Items (with optional enchantments)
+```http
+GET /crafting/give?player=Alex&item=diamond_sword&count=1&enchant=sharpness:5&enchant=unbreaking:3
+```
+- Requires the bot to be OP
+- `player`: target player
+- `item`: `diamond_sword` or `minecraft:diamond_sword`
+- `count`: 1..64
+- `enchant`: repeatable `id:level` strings (e.g., `sharpness:5`)
+
+### Planks Quest
+```http
+POST /quest
+Content-Type: application/json
+
+{
+  "target": 8,
+  "assistCrafting": true,
+  "playerName": "YourName"
+}
+```
+Starts a quest that completes when the bot has gained at least 8 wooden planks since activation. On start the bot says: "tu doit me fournir 8 item de planches de bois" and on completion it says: "Bravo". It also rewards `playerName` with 10 emeralds using `/give` (the bot must be OP). After completion, the quest consumes (removes from inventory) up to the target count of planks credited to the quest.
+
+```http
+GET /quest/status
+```
+Returns quest status.
+
+```http
+POST /quest/stop
+```
+Stops the quest.
 
 ## Response Format
 
@@ -118,12 +151,13 @@ All endpoints return responses in this format:
 
 ## Features
 
-- ✅ **Auto-reconnection** with exponential backoff
+- ✅ **Auto-reconnection** with retry loop
 - ✅ **Pathfinding** for intelligent movement
 - ✅ **Error handling** with consistent API responses
 - ✅ **TypeScript** for better development experience
 - ✅ **Clean architecture** with separated concerns
 - ✅ **Minimal dependencies** for easy deployment
+- ✅ **Quest monitoring** for wooden planks with optional auto-crafting assist
 
 ## Usage with MCP
 

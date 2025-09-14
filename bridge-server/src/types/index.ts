@@ -54,3 +54,40 @@ export interface CraftRequest {
     item: string;
     count?: number;
 }
+
+// Quest system types
+export interface Quest {
+    name: string;
+    description: string;
+    steps: QuestStep[];
+    requirements?: string[];
+    rewards?: string[];
+}
+
+export interface QuestStep {
+    id: string;
+    description: string;
+    action: string;
+    parameters?: any;
+    completed: boolean;
+}
+
+export interface QuestProgress {
+    questName: string;
+    currentStep: number;
+    completed: boolean;
+    steps: QuestStep[];
+    startTime: number;
+    endTime?: number;
+}
+
+export interface QuestRequest {
+    questName: string;
+}
+
+export interface AutonomousConfig {
+    enabled: boolean;
+    maxIdleTime: number; // seconds
+    priorities: string[];
+    safetyChecks: boolean;
+}
