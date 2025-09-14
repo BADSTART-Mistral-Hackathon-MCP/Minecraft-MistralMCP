@@ -9,7 +9,6 @@ import { createCraftingRoutes } from './crafting';
 import { createInventoryRoutes } from './inventory';
 import { createQuestRoutes } from './quest';
 import { createDMRoutes } from './dm';
-import { createQuestsRoutes } from './quests';
 import { createWorldRoutes } from './world';
 import { createActionsRoutes } from './actions';
 import { createEventsRoutes } from './events';
@@ -33,7 +32,7 @@ export function setupRoutes(app: Express, bot: MinecraftBot): void {
     app.use('/quest', createQuestRoutes(bot));
     // New namespaced routes for DM/Quests/World/Actions and server-sent events
     app.use('/dm', createDMRoutes(bot));
-    app.use('/quests', createQuestsRoutes(bot));
+    // Removed complex quests routes; keep only simple /quest
     app.use('/world', createWorldRoutes(bot));
     app.use('/actions', createActionsRoutes(bot));
     app.use('/', createEventsRoutes());

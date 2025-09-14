@@ -54,9 +54,7 @@ app.listen(serverPort, () => {
     console.log('  POST /crafting/item      - Craft items');
     console.log('  GET  /crafting/give      - Give items (query params)');
     console.log('  GET  /inventory          - Get bot inventory');
-    console.log('  POST /quest              - Start planks quest');
-    console.log('  GET  /quest/status       - Planks quest status');
-    console.log('  POST /quest/stop         - Stop planks quest');
+    console.log("  POST /quest              - Start simple '8 gold ingots' quest");
 });
 
 // Graceful shutdown
