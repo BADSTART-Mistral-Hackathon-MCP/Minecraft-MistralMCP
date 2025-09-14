@@ -15,7 +15,7 @@ const botConfig: BotConfig = {
     port: parseInt(process.env.MC_PORT || '25565'),
     username: process.env.MC_USERNAME || 'BridgeBot',
     password: process.env.MC_PASSWORD,
-    version: process.env.MC_VERSION || '1.21.1'
+    version: process.env.MC_VERSION || '1.18'
 };
 
 // Server configuration
