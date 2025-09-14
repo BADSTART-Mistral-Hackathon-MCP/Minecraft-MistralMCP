@@ -5,6 +5,7 @@ import { setupBotEvents } from './events';
 
 class MinecraftBot {
     private bot: mineflayer.Bot | null = null;
+    private combatActive = false;
 
     public getBotInstance(): mineflayer.Bot | null {
         return this.bot;
@@ -59,6 +60,7 @@ class MinecraftBot {
 
     private onEnd(reason: string): void {
         console.log('🔌 Bot disconnected:', reason);
+        this.combatActive = false; // Stop combat when bot disconnects
         if (reason !== 'disconnect.quitting') {
             this.attemptReconnect();
         }
@@ -274,6 +276,109 @@ class MinecraftBot {
             count: item.count,
             slot: item.slot
         }));
+    }
+
+    public async attackNearestEntity(maxDistance = 16, hostileOnly = true): Promise<string> {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+
+        if (this.combatActive) {
+            throw new Error('Already in combat - use stop attack to cancel');
+        }
+
+        // Start combat in background and return immediately
+        this.startCombat(maxDistance, hostileOnly);
+        return "Combat started - bot is now attacking";
+    }
+
+    private async startCombat(maxDistance: number, hostileOnly: boolean): Promise<void> {
+        const bot = this.bot!;
+        this.combatActive = true;
+
+        // Find initial target
+        let target = bot.nearestEntity(entity => {
+            if (!entity || entity === bot.entity) return false;
+
+            const distance = bot.entity.position.distanceTo(entity.position);
+            if (distance > maxDistance) return false;
+
+            if (hostileOnly) {
+                const hostileMobs = ['Zombie', 'Skeleton', 'Creeper', 'Spider', 'Enderman', 'Witch', 'Slime'];
+                return !!(entity.displayName && hostileMobs.includes(entity.displayName));
+            }
+
+            return entity.type === 'mob' || entity.type === 'player';
+        });
+
+        if (!target) {
+            this.combatActive = false;
+            bot.chat('No valid targets found');
+            return;
+        }
+
+        const targetName = target.displayName || target.name || 'entity';
+        bot.chat(`Engaging ${targetName}`);
+
+        // Combat loop
+        while (target && target.isValid !== false && bot.health > 0 && this.combatActive) {
+            const distance = bot.entity.position.distanceTo(target.position);
+
+            // Check if target is out of range
+            if (distance > maxDistance) {
+                bot.chat(`${targetName} escaped - too far away`);
+                break;
+            }
+
+            // Move closer if too far to attack (more than 4 blocks)
+            if (distance > 4) {
+                const goal = new goals.GoalNear(target.position.x, target.position.y, target.position.z, 2);
+                bot.pathfinder.setGoal(goal);
+
+                // Wait a bit for movement
+                await new Promise(resolve => setTimeout(resolve, 500));
+                continue;
+            }
+
+            // Stop movement and attack
+            bot.pathfinder.setGoal(null);
+
+            // Look at target and attack
+            bot.lookAt(target.position.offset(0, target.height / 2, 0));
+            bot.attack(target);
+
+            // Wait for attack cooldown
+            await new Promise(resolve => setTimeout(resolve, 600));
+        }
+
+        // Combat ended
+        this.combatActive = false;
+        bot.pathfinder.setGoal(null);
+
+        if (bot.health <= 0) {
+            bot.chat("I died in combat");
+        } else if (!target || target.isValid === false) {
+            bot.chat(`${targetName} defeated`);
+        }
+    }
+
+    public stopAttack(): string {
+        if (!this.combatActive) {
+            return "Not currently in combat";
+        }
+
+        this.combatActive = false;
+        if (this.bot) {
+            this.bot.pathfinder.setGoal(null);
+        }
+        return "Attack cancelled";
+    }
+
+    public getCombatStatus(): { active: boolean; message: string } {
+        return {
+            active: this.combatActive,
+            message: this.combatActive ? "Bot is currently in combat" : "Bot is not in combat"
+        };
     }
 }
 

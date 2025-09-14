@@ -54,3 +54,8 @@ export interface CraftRequest {
     item: string;
     count?: number;
 }
+
+export interface AttackNearestRequest {
+    maxDistance?: number;
+    hostileOnly?: boolean;
+}
