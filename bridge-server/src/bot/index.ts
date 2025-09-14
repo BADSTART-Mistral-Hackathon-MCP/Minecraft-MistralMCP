@@ -9,6 +9,9 @@ class MinecraftBot {
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 5;
     private isReconnecting = false;
+    private autoFollowInterval: NodeJS.Timeout | null = null;
+    private autoFollowTarget: string | null = null;
+    private autoFollowDistance = 2;
 
     constructor(config: BotConfig) {
         this.config = config;
@@ -41,6 +44,7 @@ class MinecraftBot {
         this.bot.once('spawn', () => {
             this.reconnectAttempts = 0;
             this.isReconnecting = false;
+            this.onSpawn();
         });
 
         this.bot.on('error', this.onError.bind(this));
@@ -162,6 +166,16 @@ class MinecraftBot {
         return `Following ${playerName} at ${distance} blocks distance`;
     }
 
+    public followNearestPlayer(distance = 2): string {
+        if (!this.isReady() || !this.bot) {
+            throw new Error('Bot is not ready');
+        }
+        const name = this.findNearestPlayerName();
+        if (!name) throw new Error('No players found to follow');
+        this.autoFollowTarget = name;
+        return this.followPlayer(name, distance);
+    }
+
     public stopMovement(): string {
         if (!this.isReady() || !this.bot) {
             throw new Error('Bot is not ready');
@@ -179,6 +193,93 @@ class MinecraftBot {
         this.bot.setControlState('sneak', false);
 
         return 'Bot movement stopped';
+    }
+
+    private findNearestPlayerName(): string | null {
+        if (!this.isReady() || !this.bot) return null;
+        const self = this.bot.entity?.position;
+        if (!self) return null;
+        let best: { name: string; d2: number } | null = null;
+        for (const [name, p] of Object.entries(this.bot.players)) {
+            if (!p || !p.entity) continue;
+            if (name === this.bot.username) continue;
+            const pos = p.entity.position;
+            const dx = pos.x - self.x;
+            const dy = pos.y - self.y;
+            const dz = pos.z - self.z;
+            const d2 = dx*dx + dy*dy + dz*dz;
+            if (!best || d2 < best.d2) best = { name, d2 };
+        }
+        return best?.name || null;
+    }
+
+    private async teleportNearPlayer(playerName: string, distance = 2): Promise<boolean> {
+        if (!this.isReady() || !this.bot) return false;
+        const player = this.bot.players[playerName];
+        if (!player || !player.entity) return false;
+        const pos = player.entity.position.clone();
+        // Offset by +distance on X axis to avoid overlapping
+        const tx = Math.floor(pos.x + distance);
+        const ty = Math.floor(pos.y);
+        const tz = Math.floor(pos.z);
+        try {
+            const { ok } = await this.runCommand(`/tp ${this.bot.username} ${tx} ${ty} ${tz}`, 2000);
+            return ok;
+        } catch {
+            return false;
+        }
+    }
+
+    private startAutoFollow(): void {
+        if (!this.isReady() || !this.bot) return;
+        // Try to pick nearest player immediately
+        try {
+            const name = this.findNearestPlayerName();
+            if (name) {
+                this.autoFollowTarget = name;
+                this.followPlayer(name, this.autoFollowDistance);
+                // Attempt to TP near the target (requires OP)
+                this.teleportNearPlayer(name, this.autoFollowDistance).then(() => {}).catch(() => {});
+            }
+        } catch {}
+
+        // Start a lightweight loop to maintain following when players join/leave
+        if (this.autoFollowInterval) clearInterval(this.autoFollowInterval);
+        this.autoFollowInterval = setInterval(() => {
+            if (!this.isReady() || !this.bot) return;
+            const target = this.autoFollowTarget;
+            if (target) {
+                const data = this.bot.players[target];
+                if (!data || !data.entity) {
+                    // Target lost -> choose a new nearest target
+                    const name = this.findNearestPlayerName();
+                    if (name) {
+                        this.autoFollowTarget = name;
+                        try { this.followPlayer(name, this.autoFollowDistance); } catch {}
+                    }
+                }
+            } else {
+                // Not following anyone yet -> try to start
+                const name = this.findNearestPlayerName();
+                if (name) {
+                    this.autoFollowTarget = name;
+                    try { this.followPlayer(name, this.autoFollowDistance); } catch {}
+                }
+            }
+        }, 3000);
+
+        // React when players join
+        this.bot.on('playerJoined', (p) => {
+            if (!p || !p.username) return;
+            if (!this.autoFollowTarget) {
+                try { this.followNearestPlayer(this.autoFollowDistance); } catch {}
+            }
+        });
+    }
+
+    private onSpawn(): void {
+        // Auto follow nearest player at spawn and attempt a teleport near them
+        this.startAutoFollow();
     }
 
     public getPosition() {
@@ -201,6 +302,10 @@ class MinecraftBot {
             throw new Error('Bot is not ready');
         }
         this.bot.chat(message);
+    }
+
+    public getInternalBot() {
+        return this.bot;
     }
 
     public async runCommand(command: string, timeoutMs = 3000): Promise<{ ok: boolean; output: string[] }>{

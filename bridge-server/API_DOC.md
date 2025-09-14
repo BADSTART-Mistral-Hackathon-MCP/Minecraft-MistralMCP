@@ -152,6 +152,37 @@ GET /crafting/give?player=Alex&item=minecraft:emerald&count=10
 
 ---
 
+## New DM/Quests/World/Actions APIs
+
+### /dm
+- POST `/dm/chat` body: `{ "playerName": "Alex", "message": "je veux une quête" }`
+- POST `/dm/tool-calls` body: `{ "calls": [ {"tool":"propose_quest","args":{"playerName":"Alex"}} ] }`
+- POST `/dm/persona` body: `{ "persona": "wise_cat", "temperature": 0.6 }`
+- GET  `/dm/context?playerName=Alex`
+
+### /quests
+- POST `/quests/generate` body: `{ "playerName": "Alex", "seed?": "...", "biomeBias?": ["plains"], "difficulty?": "normal" }`
+- POST `/quests/:id/start`
+- POST `/quests/:id/accept`
+- POST `/quests/:id/decline`
+- GET  `/quests/:id/status`
+- POST `/quests/:id/branch` body: `{ "choice": "sauver_villageois" }`
+- POST `/quests/:id/stop`
+- POST `/quests/:id/reward`
+
+### /world
+- GET `/world/snapshot?around=Alex&radius=32`
+
+### /actions
+- POST `/actions/spawn` body: `{ "type":"minecraft:skeleton", "count":1, "near": { "playerName":"Alex", "radius":5 } }`
+- POST `/actions/grant` body: `{ "playerName":"Alex", "items":[{"itemId":"minecraft:emerald","count":10}] }`
+- POST `/actions/effect` body: `{ "playerName":"Alex","effectId":"minecraft:speed","durationSec":30,"amplifier":1 }`
+- POST `/actions/waypoint` body: `{ "playerName":"Alex","x":0,"y":64,"z":0,"label":"Objectif" }`
+
+### /events (SSE)
+- GET `/events` – flux d’événements: `dm_say`, `quest_started`, `quest_succeeded`, `quest_failed`, `quest_updated`.
+
+
 ## Notes
 - All endpoints return a standard response format with success/error and message.
 - Some endpoints (e.g., `/whisper`, `/history`, `/recipes`, `/area`, `/vein`) are planned but not yet implemented.
