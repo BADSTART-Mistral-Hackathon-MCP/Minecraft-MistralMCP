@@ -4,7 +4,7 @@ function escapeJson(s: string): string {
   return s.replace(/"/g, '\\"');
 }
 
-export async function sendDMWithChoices(bot: MinecraftBot, playerName: string, text: string, questId: string, options: string[]): Promise<void> {
+export async function sendDMWithChoices(bot: any, playerName: string, text: string, questId: string, options: string[]): Promise<void> {
   const safeText = escapeJson(text);
   const parts = options.map((opt, idx) => {
     const label = opt;
@@ -16,17 +16,34 @@ export async function sendDMWithChoices(bot: MinecraftBot, playerName: string, t
 
   // Try to use /tellraw (requires OP). Fallback to plain say.
   try {
-    const out = await bot.runCommand(`/tellraw ${playerName} ${json}`, 1500);
-    if (!out.ok) {
-      // Fallback
-      bot.say(`${text} Options: ${options.map(o=>`[${o}]`).join(' ')} (ou tape: ##DM## q:${questId} <choix>)`);
+    if (typeof bot.runCommand === 'function') {
+      const out = await bot.runCommand(`/tellraw ${playerName} ${json}`, 1500);
+      if (!out.ok && typeof bot.say === 'function') {
+        bot.say(`${text} Options: ${options.map(o=>`[${o}]`).join(' ')} (ou tape: ##DM## q:${questId} <choix>)`);
+      }
+    } else if (typeof bot.chat === 'function') {
+      bot.chat(`/tellraw ${playerName} ${json}`);
     }
   } catch {
-    bot.say(`${text} Options: ${options.map(o=>`[${o}]`).join(' ')} (ou tape: ##DM## q:${questId} <choix>)`);
+    if (typeof bot.say === 'function') {
+      bot.say(`${text} Options: ${options.map(o=>`[${o}]`).join(' ')} (ou tape: ##DM## q:${questId} <choix>)`);
+    } else if (typeof bot.chat === 'function') {
+      bot.chat(`${text} Options: ${options.map(o=>`[${o}]`).join(' ')} (ou tape: ##DM## q:${questId} <choix>)`);
+    }
   }
 }
 
-export async function sendDMAck(bot: MinecraftBot, playerName: string, text: string): Promise<void> {
-  try { await bot.runCommand(`/tellraw ${playerName} {\"text\":\"${escapeJson(text)}\",\"color\":\"green\"}`); } catch { bot.say(text); }
+export async function sendDMAck(bot: any, playerName: string, text: string): Promise<void> {
+  try {
+    if (typeof bot.runCommand === 'function') {
+      await bot.runCommand(`/tellraw ${playerName} {\\\"text\\\":\\\"${escapeJson(text)}\\\",\\\"color\\\":\\\"green\\\"}`);
+    } else if (typeof bot.chat === 'function') {
+      bot.chat(`/tellraw ${playerName} {\\\"text\\\":\\\"${escapeJson(text)}\\\",\\\"color\\\":\\\"green\\\"}`);
+    } else if (typeof bot.say === 'function') {
+      bot.say(text);
+    }
+  } catch {
+    if (typeof bot.say === 'function') bot.say(text);
+    else if (typeof bot.chat === 'function') bot.chat(text);
+  }
 }
-

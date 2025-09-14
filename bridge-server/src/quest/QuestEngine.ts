@@ -1,8 +1,9 @@
 import { EventEmitter } from 'events';
 import MinecraftBot from '../bot';
-import { QuestBlueprint, QuestInstance, QuestState, Objective } from '../types/quest';
+import { QuestBlueprint, QuestInstance } from '../types/quest';
 import { QuestRepo } from './QuestRepo';
 import { bus } from '../services/bus';
+import { sendDMAck } from '../dm/publish';
 
 export class QuestEngine {
   private quests = new Map<string, QuestInstance>();
@@ -79,8 +80,19 @@ export class QuestEngine {
     const q = this.mustGet(id);
     q.state = 'success';
     await this.repo.save(q);
+    // Grant rewards if any
+    try {
+      await this.grantRewards(q);
+    } catch (e) {
+      console.warn('Grant rewards failed for quest', q.id, e);
+    }
+    // Notify player
+    try {
+      const line = q.flavorLines?.success?.[0] || 'Quête réussie !';
+      await sendDMAck((this.bot as any), q.playerName, line);
+    } catch {}
     this.cleanup(q);
-    this.emitter.emit('quest_succeeded', { id: q.id });
+    this.emitter.emit('quest_succeeded', { id: q.id, playerName: q.playerName });
     console.log(`Quest ${q.id} succeeded for player ${q.playerName}`);
   }
 
@@ -137,6 +149,27 @@ export class QuestEngine {
       }
       q.timers = {};
       console.log(`Quest ${q.id} timers cleared for player ${q.playerName}`);
+    }
+  }
+
+  private async grantRewards(q: QuestInstance): Promise<void> {
+    // Items
+    const items = q.reward?.items || [];
+    for (const it of items) {
+      try {
+        await (this.bot as any).giveItem(q.playerName, it.itemId, Math.max(1, Math.min(64, it.count || 1)), it.enchants);
+      } catch (e) {
+        console.warn('Reward item failed:', it, e);
+      }
+    }
+    // Commands
+    const cmds = q.reward?.commands || [];
+    for (const c of cmds) {
+      try { await (this.bot as any).runCommand(c.split('{player}').join(q.playerName), 1500); } catch {}
+    }
+    // XP
+    if (q.reward?.xp && q.reward.xp > 0) {
+      try { await (this.bot as any).runCommand(`/experience add ${q.playerName} ${q.reward.xp} points`, 1500); } catch {}
     }
   }
 

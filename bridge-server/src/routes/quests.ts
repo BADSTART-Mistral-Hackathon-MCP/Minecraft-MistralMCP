@@ -5,6 +5,7 @@ import MinecraftBot from '../bot';
 import { getQuestEngine } from '../services/registry';
 import { QuestBlueprint } from '../types/quest';
 import crypto from 'crypto';
+import { sendDMWithChoices } from '../dm/publish';
 
 export function createQuestsRoutes(bot: MinecraftBot): Router {
   const router = Router();
@@ -30,9 +31,13 @@ export function createQuestsRoutes(bot: MinecraftBot): Router {
       };
 
       const q = await engine.instantiate(bp, playerName);
+      try { await sendDMWithChoices(bot, playerName, 'Accepter cette quête ?', q.id, ['oui','non']); } catch {}
       ResponseHelper.success(res, { quest: q, dmText: 'Accepter cette quête ? (oui/non)' });
+      console.log(`Quest ${q.id} generated for player ${playerName}`);
     } catch (e) {
       ResponseHelper.error(res, e instanceof Error ? e.message : 'Generate failed');
+      console.log(e);
+      console.log('Quest generation failed' );
     }
   });
 
@@ -42,17 +47,21 @@ export function createQuestsRoutes(bot: MinecraftBot): Router {
       ResponseHelper.success(res, { id: req.params.id }, 'Quest started');
     } catch (e) {
       ResponseHelper.error(res, e instanceof Error ? e.message : 'Start failed');
+      console.log(e);
+      console.log(`Quest ${req.params.id} start failed`);
     }
   });
 
   router.post('/:id/accept', requireBot(bot), async (req, res) => {
     try { await engine.accept(req.params.id); ResponseHelper.success(res, { id: req.params.id }, 'Quest accepted'); }
     catch (e) { ResponseHelper.error(res, e instanceof Error ? e.message : 'Accept failed'); }
+    console.log( `Quest ${req.params.id} accepted by user` );
   });
 
   router.post('/:id/decline', requireBot(bot), async (req, res) => {
     try { await engine.decline(req.params.id); ResponseHelper.success(res, { id: req.params.id }, 'Quest declined'); }
     catch (e) { ResponseHelper.error(res, e instanceof Error ? e.message : 'Decline failed'); }
+    console.log( `Quest ${req.params.id} declined by user` );
   });
 
   router.get('/:id/status', async (req, res) => {
@@ -62,22 +71,27 @@ export function createQuestsRoutes(bot: MinecraftBot): Router {
       ResponseHelper.success(res, q);
     } catch (e) {
       ResponseHelper.error(res, e instanceof Error ? e.message : 'Status failed');
+      console.log(e);
+      console.log(`Quest ${req.params.id} status check failed`);
     }
   });
 
   router.post('/:id/branch', requireBot(bot), async (req, res) => {
     try { await engine.branch(req.params.id, String(req.body?.choice || '')); ResponseHelper.success(res, { id: req.params.id }); }
     catch (e) { ResponseHelper.error(res, e instanceof Error ? e.message : 'Branch failed'); }
+    console.log( `Quest ${req.params.id} branched by user` );
   });
 
   router.post('/:id/stop', requireBot(bot), async (req, res) => {
     try { await engine.fail(req.params.id, 'stopped'); ResponseHelper.success(res, { id: req.params.id }, 'Quest stopped'); }
     catch (e) { ResponseHelper.error(res, e instanceof Error ? e.message : 'Stop failed'); }
+    console.log( `Quest ${req.params.id} stopped by user` );
   });
 
   router.post('/:id/reward', requireBot(bot), async (req, res) => {
     try { await engine.succeed(req.params.id); ResponseHelper.success(res, { id: req.params.id }, 'Reward granted'); }
     catch (e) { ResponseHelper.error(res, e instanceof Error ? e.message : 'Reward failed'); }
+    console.log( `Quest ${req.params.id} reward processed` );
   });
 
   return router;

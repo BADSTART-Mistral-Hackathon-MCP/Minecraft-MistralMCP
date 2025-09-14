@@ -92,13 +92,13 @@ export function setupBotEvents(bot: mineflayer.Bot) {
             const engine = getQuestEngine();
             if (option === 'oui' || option === 'yes') {
                 await engine.accept(questId);
-                await sendDMAck((bot as any).mcBot || (bot as any), username, 'Quête acceptée. Bonne chance !');
+                await sendDMAck(bot as any, username, 'Quête acceptée. Bonne chance !');
             } else if (option === 'non' || option === 'no') {
                 await engine.decline(questId);
-                await sendDMAck((bot as any).mcBot || (bot as any), username, 'Quête refusée. Une autre fois peut-être.');
+                await sendDMAck(bot as any, username, 'Quête refusée. Une autre fois peut-être.');
             } else {
                 await engine.branch(questId, option);
-                await sendDMAck((bot as any).mcBot || (bot as any), username, `Choix enregistré: ${option}`);
+                await sendDMAck(bot as any, username, `Choix enregistré: ${option}`);
             }
         } catch (e) {
             console.error('DM choice handling failed:', e);
