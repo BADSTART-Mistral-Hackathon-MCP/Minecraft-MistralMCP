@@ -5,6 +5,10 @@ import { setupBotEvents } from './events';
 
 class MinecraftBot {
     private bot: mineflayer.Bot | null = null;
+
+    public getBotInstance(): mineflayer.Bot | null {
+        return this.bot;
+    }
     private config: BotConfig;
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 5;
@@ -149,7 +153,7 @@ class MinecraftBot {
         });
     }
 
-    public followPlayer(playerName: string, distance = 3): string {
+    public followPlayer(playerName: string, distance = 3, continuous = false): string {
         if (!this.isReady() || !this.bot) {
             throw new Error('Bot is not ready');
         }
@@ -161,7 +165,7 @@ class MinecraftBot {
 
         // Use GoalFollow to follow the player
         const goal = new goals.GoalFollow(player.entity, distance);
-        this.bot.pathfinder.setGoal(goal, true);
+        this.bot.pathfinder.setGoal(goal, continuous);
 
         return `Following ${playerName} at ${distance} blocks distance`;
     }

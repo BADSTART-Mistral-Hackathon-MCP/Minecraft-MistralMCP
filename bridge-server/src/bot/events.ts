@@ -23,7 +23,7 @@ export function setupBotEvents(bot: mineflayer.Bot) {
         console.log(`❤️ Health: ${bot.health}/20, Food: ${bot.food}/20`);
 
         // Auto-eat if food is low
-        if (bot.food < 16) {
+        if (bot.food < 19) {
             const food = bot.inventory.items().find(item =>
                 item.name.includes('bread') ||
                 item.name.includes('apple') ||

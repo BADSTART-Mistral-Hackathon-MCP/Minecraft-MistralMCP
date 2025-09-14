@@ -1,0 +1,128 @@
+{
+    "name": "minecraft-bot",
+    "description": "API du bot Minecraft exposée via MCP",
+    "endpoints": [
+        {
+            "category": "Health",
+            "basePath": "/health",
+            "methods": [
+                {
+                    "method": "GET",
+                    "path": "/",
+                    "name": "checkHealth",
+                    "description": "Vérifie l'état du serveur et du bot"
+                }
+            ]
+        },
+        {
+            "category": "Bot Status",
+            "basePath": "/bot",
+            "methods": [
+                {
+                    "method": "GET",
+                    "path": "/status",
+                    "name": "getBotStatus",
+                    "description": "Retourne le statut détaillé du bot (santé, position, joueurs en ligne)"
+                }
+            ]
+        },
+        {
+            "category": "Movement",
+            "basePath": "/movement",
+            "methods": [
+                {
+                    "method": "POST",
+                    "path": "/moveTo",
+                    "name": "moveTo",
+                    "description": "Déplace le bot vers des coordonnées spécifiques",
+                    "parameters": {
+                        "x": "number",
+                        "y": "number",
+                        "z": "number"
+                    }
+                },
+                {
+                    "method": "POST",
+                    "path": "/follow",
+                    "name": "followPlayer",
+                    "description": "Fait suivre le bot à un joueur avec une distance donnée",
+                    "parameters": {
+                        "playerName": "string",
+                        "distance": "number"
+                    }
+                },
+                {
+                    "method": "POST",
+                    "path": "/stop",
+                    "name": "stopMovement",
+                    "description": "Arrête tous les mouvements en cours"
+                },
+                {
+                    "method": "GET",
+                    "path": "/position",
+                    "name": "getPosition",
+                    "description": "Retourne la position et l'orientation actuelles du bot"
+                }
+            ]
+        },
+        {
+            "category": "Chat",
+            "basePath": "/chat",
+            "methods": [
+                {
+                    "method": "POST",
+                    "path": "/say",
+                    "name": "sayMessage",
+                    "description": "Envoie un message dans le chat",
+                    "parameters": {
+                        "message": "string"
+                    }
+                }
+            ]
+        },
+        {
+            "category": "Mining",
+            "basePath": "/mining",
+            "methods": [
+                {
+                    "method": "POST",
+                    "path": "/block",
+                    "name": "mineBlock",
+                    "description": "Mine un ou plusieurs types de blocs dans une portée donnée",
+                    "parameters": {
+                        "blockType": "string",
+                        "range": "number"
+                    }
+                }
+            ]
+        },
+        {
+            "category": "Crafting",
+            "basePath": "/crafting",
+            "methods": [
+                {
+                    "method": "POST",
+                    "path": "/item",
+                    "name": "craftItem",
+                    "description": "Fabrique un objet avec une quantité spécifiée",
+                    "parameters": {
+                        "item": "string",
+                        "count": "number"
+                    }
+                }
+            ]
+        },
+        {
+            "category": "Inventory",
+            "basePath": "/inventory",
+            "methods": [
+                {
+                    "method": "GET",
+                    "path": "/",
+                    "name": "getInventory",
+                    "description": "Retourne l'inventaire complet du bot"
+                }
+            ]
+        }
+    ]
+}

@@ -24,18 +24,36 @@ export function createMovementRoutes(bot: MinecraftBot): Router {
     }));
 
     router.post('/follow', requireBot(bot), (req, res) => {
-        const { playerName, distance = 3 }: FollowRequest = req.body;
+        const { playerName, distance = 3, continuous = false }: FollowRequest = req.body;
 
-        if (typeof playerName !== 'string' || !playerName.trim()) {
-            return ResponseHelper.badRequest(res, 'Player name must be a non-empty string');
-        }
-
-        if (typeof distance !== 'number' || distance < 1 || distance > 10) {
-            return ResponseHelper.badRequest(res, 'Distance must be a number between 1 and 10');
+        let targetName = playerName;
+        // If no playerName, find nearest player
+        if (typeof targetName !== 'string' || !targetName.trim()) {
+            const botInstance = bot.getBotInstance();
+            if (!botInstance) {
+                return ResponseHelper.error(res, 'Bot is not ready');
+            }
+            let nearest = null;
+            let minDist = Infinity;
+            const myPos = botInstance.entity.position;
+            for (const name in botInstance.players) {
+                const p = botInstance.players[name];
+                if (p && p.entity && name !== botInstance.username) {
+                    const dist = myPos.distanceTo(p.entity.position);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = name;
+                    }
+                }
+            }
+            if (!nearest) {
+                return ResponseHelper.error(res, 'No players found to follow');
+            }
+            targetName = nearest;
         }
 
         try {
-            const result = bot.followPlayer(playerName, distance);
+            let result = bot.followPlayer(targetName, distance, continuous);
             ResponseHelper.success(res, undefined, result);
         } catch (error) {
             ResponseHelper.error(res, error instanceof Error ? error.message : 'Follow failed');
