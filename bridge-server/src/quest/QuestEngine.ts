@@ -29,6 +29,7 @@ export class QuestEngine {
     this.attachWatchers(q);
     await this.repo.save(q);
     this.emitter.emit('quest_started', { id: q.id, playerName: q.playerName });
+    console.log(`Quest ${q.id} started for player ${q.playerName}`);
   }
 
   async accept(id: string) {
@@ -39,6 +40,7 @@ export class QuestEngine {
       this.attachWatchers(q);
       await this.repo.save(q);
       this.emitter.emit('quest_started', { id: q.id, playerName: q.playerName });
+      console.log(`Quest ${q.id} accepted by player ${q.playerName}`);
     }
   }
 
@@ -48,6 +50,7 @@ export class QuestEngine {
     await this.repo.save(q);
     this.cleanup(q);
     this.emitter.emit('quest_failed', { id: q.id, reason: 'declined' });
+    console.log(`Quest ${q.id} declined by player ${q.playerName}`);
   }
 
   async branch(id: string, choice: string) {
@@ -56,6 +59,20 @@ export class QuestEngine {
     q.runtime.counters['branch'] = choice.length;
     await this.repo.save(q);
     this.emitter.emit('quest_updated', { id: q.id, branch: choice });
+    console.log(`Quest ${q.id} branched to ${choice} by player ${q.playerName}`);
+  }
+
+  async setTimer(id: string, seconds: number, label?: string) {
+    const q = this.mustGet(id);
+    const ms = Math.max(1, Math.floor(seconds)) * 1000;
+    q.runtime.counters = q.runtime.counters || {};
+    q.runtime.counters['deadline'] = Date.now() + ms;
+    q.timers = q.timers || {};
+    if (q.timers['TIMER']) clearTimeout(q.timers['TIMER']);
+    q.timers['TIMER'] = setTimeout(() => this.fail(q.id, 'timer'), ms);
+    await this.repo.save(q);
+    this.emitter.emit('quest_updated', { id: q.id, timer: { seconds, label } });
+    console.log(`Quest ${q.id} timer set to ${seconds}s by player ${q.playerName}`);
   }
 
   async succeed(id: string) {
@@ -64,6 +81,7 @@ export class QuestEngine {
     await this.repo.save(q);
     this.cleanup(q);
     this.emitter.emit('quest_succeeded', { id: q.id });
+    console.log(`Quest ${q.id} succeeded for player ${q.playerName}`);
   }
 
   async fail(id: string, reason: string) {
@@ -72,6 +90,7 @@ export class QuestEngine {
     await this.repo.save(q);
     this.cleanup(q);
     this.emitter.emit('quest_failed', { id: q.id, reason });
+    console.log(`Quest ${q.id} failed for player ${q.playerName}: ${reason}`);
   }
 
   private attachWatchers(q: QuestInstance) {
@@ -97,6 +116,8 @@ export class QuestEngine {
             o.target = o.target ?? (o.params?.count ?? 1);
             o.progress = total;
             o.completed = total >= (o.target || 1);
+            // Update quest state in repo
+            console.log(`Quest ${q.id} COLLECT check: have ${total} of ${itemId}, need ${o.target}`);
           }
           if (collect.every(x => x.completed)) {
             this.succeed(q.id);
@@ -105,6 +126,7 @@ export class QuestEngine {
       }, 2000);
       q.timers = q.timers || {};
       q.timers['COLLECT'] = int as unknown as NodeJS.Timeout;
+      console.log(`Quest ${q.id} COLLECT watcher started for player ${q.playerName}`);
     }
   }
 
@@ -114,12 +136,14 @@ export class QuestEngine {
         clearTimeout(q.timers[k]);
       }
       q.timers = {};
+      console.log(`Quest ${q.id} timers cleared for player ${q.playerName}`);
     }
   }
 
   private mustGet(id: string): QuestInstance {
     const q = this.quests.get(id);
     if (!q) throw new Error('Quest not found');
+    console.log(`Quest ${q.id} retrieved for player ${q.playerName}`);
     return q;
   }
 }

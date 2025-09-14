@@ -33,6 +33,7 @@ export function createQuestRoutes(bot: MinecraftBot): Router {
       ResponseHelper.success(res, status);
     } catch (error) {
       ResponseHelper.error(res, error instanceof Error ? error.message : 'Failed to get status');
+      console.error(error);
     }
   });
 
@@ -44,6 +45,7 @@ export function createQuestRoutes(bot: MinecraftBot): Router {
       ResponseHelper.success(res, status, 'Quest stopped');
     } catch (error) {
       ResponseHelper.error(res, error instanceof Error ? error.message : 'Failed to stop quest');
+      console.log(error);
     }
   });
 

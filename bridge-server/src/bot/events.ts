@@ -1,5 +1,7 @@
 import mineflayer from 'mineflayer';
 import { Movements } from 'mineflayer-pathfinder';
+import { getQuestEngine } from '../services/registry';
+import { sendDMAck } from '../dm/publish';
 
 export function setupBotEvents(bot: mineflayer.Bot) {
     bot.once('spawn', () => {
@@ -76,6 +78,31 @@ export function setupBotEvents(bot: mineflayer.Bot) {
 
     bot.on('playerLeft', (player) => {
         console.log(`👋 Player left: ${player.username}`);
+    });
+
+    // Chat selection handler: players can send "##DM## q:<id> <option>"
+    bot.on('chat', async (username, message) => {
+        try {
+            if (!username || username === bot.username) return;
+            const text = message?.toString?.() || String(message || '');
+            const match = text.match(/^##DM##\s+q:([^\s]+)\s+(.+)$/i);
+            if (!match) return;
+            const questId = match[1];
+            const option = match[2].trim().toLowerCase();
+            const engine = getQuestEngine();
+            if (option === 'oui' || option === 'yes') {
+                await engine.accept(questId);
+                await sendDMAck((bot as any).mcBot || (bot as any), username, 'Quête acceptée. Bonne chance !');
+            } else if (option === 'non' || option === 'no') {
+                await engine.decline(questId);
+                await sendDMAck((bot as any).mcBot || (bot as any), username, 'Quête refusée. Une autre fois peut-être.');
+            } else {
+                await engine.branch(questId, option);
+                await sendDMAck((bot as any).mcBot || (bot as any), username, `Choix enregistré: ${option}`);
+            }
+        } catch (e) {
+            console.error('DM choice handling failed:', e);
+        }
     });
 
     // Death event
