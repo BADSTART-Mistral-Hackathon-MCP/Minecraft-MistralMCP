@@ -10,6 +10,10 @@ dependencies = [
     "cors>=1.0.1",
     "fastapi>=0.116.1",
     "fastmcp>=2.12.3",
+    "httpx>=0.28.1",
+    "mistralai==0.4.2",
+    "pydantic>=2.11.9",
     "python-dotenv>=1.1.1",
+    "socketio>=0.2.1",
     "typing>=3.10.0.0",
 ]

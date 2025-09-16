@@ -1,69 +1,71 @@
-import dotenv from 'dotenv';
-import express from 'express';
+import express, { Express } from 'express';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
-import MinecraftBot from './bot';
+import dotenv from 'dotenv';
+import { BotManager } from './services/BotManager';
+import { WebSocketManager } from './services/WebSocketManager';
 import { setupRoutes } from './routes';
-import { errorHandler, notFoundHandler } from './middleware/error';
-import { BotConfig } from './types';
+import { errorHandler } from './middleware/errorHandler';
+import { requestLogger } from './middleware/requestLogger';
 
-// Load environment variables
 dotenv.config();
 
-// Bot configuration
-const botConfig: BotConfig = {
-    host: process.env.MC_HOST || 'localhost',
-    port: parseInt(process.env.MC_PORT || '25565'),
-    username: process.env.MC_USERNAME || 'BridgeBot',
-    password: process.env.MC_PASSWORD,
-    version: process.env.MC_VERSION || '1.21.1'
-};
+class MinecraftBotAPI {
+    private app: Express;
+    private server: any;
+    private io: SocketIOServer;
+    private botManager: BotManager;
+    private wsManager: WebSocketManager;
 
-// Server configuration
-const serverPort = parseInt(process.env.PORT || '3001');
+    constructor() {
+        this.app = express();
+        this.server = createServer(this.app);
+        this.io = new SocketIOServer(this.server, {
+            cors: {
+                origin: "*",
+                methods: ["GET", "POST"]
+            }
+        });
 
-// Create Express app
-const app = express();
+        this.botManager = new BotManager(this.io);
+        this.wsManager = new WebSocketManager(this.io, this.botManager);
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+        this.setupMiddleware();
+        this.setupRoutes();
+        this.setupWebSocket();
+    }
 
-// Create bot instance
-console.log('🚀 Starting Minecraft Bot Bridge Server...');
-console.log(`📝 Bot config: ${botConfig.host}:${botConfig.port} as ${botConfig.username}`);
+    private setupMiddleware() {
+        this.app.use(cors());
+        this.app.use(express.json());
+        this.app.use(express.urlencoded({ extended: true }));
+        this.app.use(requestLogger);
+    }
 
-const bot = new MinecraftBot(botConfig);
+    private setupRoutes() {
+        setupRoutes(this.app, this.botManager, this.io);
+        this.app.use(errorHandler);
+    }
 
-// Setup routes
-setupRoutes(app, bot);
+    private setupWebSocket() {
+        this.wsManager.initialize();
+    }
 
-// Error handling middleware (must be last)
-app.use('*', notFoundHandler);
-app.use(errorHandler);
+    async start(port: number = 3000) {
+        this.server.listen(port, async () => {
+            console.log(`Bot API server running on port ${port}`);
+            try {
+                await this.botManager.connectBot();
+                console.log('Bot connection initiated');
+            } catch (error) {
+                console.error('Failed to connect bot:', error);
+            }
+        });
+    }
+}
 
-// Start server
-app.listen(serverPort, () => {
-    console.log(`🌐 Bridge server running on http://localhost:${serverPort}`);
-    console.log(`🩺 Health check: http://localhost:${serverPort}/health`);
-    console.log('📋 Available endpoints:');
-    console.log('  GET  /health             - Server and bot status');
-    console.log('  GET  /bot/status         - Detailed bot information');
-    console.log('  POST /movement/moveTo    - Move bot to coordinates');
-    console.log('  POST /chat/say           - Make bot speak');
-    console.log('  POST /mining/block       - Mine specific blocks');
-    console.log('  POST /crafting/item      - Craft items');
-    console.log('  GET  /inventory          - Get bot inventory');
-    console.log('  POST /inventory/drop     - Drop items from inventory');
-    console.log('  POST /movement/lookAtPlayer - Look at a player');
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('🛑 Shutting down gracefully...');
-    process.exit(0);
-});
-
-process.on('SIGINT', () => {
-    console.log('🛑 Shutting down gracefully...');
-    process.exit(0);
-});
+// Start the server
+const botAPI = new MinecraftBotAPI();
+const port = parseInt(process.env.PORT || '3000');
+botAPI.start(port);
