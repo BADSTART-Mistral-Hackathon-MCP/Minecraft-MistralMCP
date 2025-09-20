@@ -3,6 +3,7 @@ import { pathfinder, Movements, goals } from 'mineflayer-pathfinder';
 import { Vec3 } from 'vec3';
 import { Server as SocketIOServer } from 'socket.io';
 import { BotState, BotCapabilities, ChatMessage, CombatStatus } from '../types';
+import { Block } from 'prismarine-block';
 
 export class BotManager {
     private bot: Bot | null = null;
@@ -14,6 +15,7 @@ export class BotManager {
     private defensiveMode = false;
     private defensiveRadius = 8;
     private isAggressive = false;
+    private _defensiveHandler: (() => Promise<void>) | null = null;
 
     constructor(io: SocketIOServer) {
         this.io = io;
@@ -424,84 +426,140 @@ export class BotManager {
     }
 
     // Action methods
-    async craftItem(item: string, quantity: number = 1, requiresTable: boolean = false): Promise<any> {
+    async craftItem(item: string, quantity: number = 1): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
 
         const startTime = Date.now();
         const mcData = require('minecraft-data')(this.bot.version);
-        const recipe = mcData.recipesByName[item];
 
-        if (!recipe) {
-            throw new Error(`Recipe for ${item} not found`);
+        // Normalize item name
+        const cleanItem = item.replace(/^minecraft:/, "");
+        const itemId = mcData.itemsByName[cleanItem]?.id;
+        if (!itemId) {
+            return { success: false, error: `Item ${item} not found in mcData`, item: cleanItem, crafted: false };
         }
 
-        let craftingTable = null;
-        if (recipe.requiresTable || requiresTable) {
-            craftingTable = this.bot.findBlock(mcData.blocksByName.crafting_table.id);
+        // Try without table first
+        let recipe = this.bot.recipesFor(itemId, null, quantity, false)[0];
+        let craftingTable: any = null;
+
+        // Retry with table if none
+        if (!recipe) {
+            craftingTable = this.bot.findBlock({
+                matching: mcData.blocksByName.crafting_table.id,
+                maxDistance: 32
+            });
+
             if (!craftingTable) {
-                throw new Error('Crafting table required but not found nearby');
+                return { success: false, error: `Crafting table required but not found nearby`, item: cleanItem, crafted: false };
+            }
+
+            recipe = this.bot.recipesFor(itemId, null, quantity, true)[0];
+            if (!recipe) {
+                return { success: false, error: `No recipe found for ${cleanItem}`, item: cleanItem, crafted: false };
+            }
+
+            // Move near crafting table
+            try {
+                const { GoalNear } = require('mineflayer-pathfinder').goals;
+                await this.bot.pathfinder.goto(new GoalNear(craftingTable.position.x, craftingTable.position.y, craftingTable.position.z, 1));
+            } catch {
+                return { success: false, error: `Cannot reach crafting table for ${cleanItem}`, item: cleanItem, crafted: false };
             }
         }
 
-        const materialsUsed = recipe.ingredients || [];
+        // Check ingredients
+        const missingItems: string[] = [];
+        for (const ing of recipe.delta) {
+            if (ing.count < 0) {
+                const required = -ing.count * quantity;
+                const have = this.bot.inventory.count(ing.id, null);
+                if (have < required) {
+                    missingItems.push(`${required - have}x ${mcData.items[ing.id].name}`);
+                }
+            }
+        }
+        if (missingItems.length > 0) {
+            return { success: false, error: `Missing materials: ${missingItems.join(', ')}`, item: cleanItem, crafted: false };
+        }
 
+        // Craft
         try {
             await this.bot.craft(recipe, quantity, craftingTable ?? undefined);
-
             this.updateLastActivity();
             this.io.emit('bot_state', this.getBotState());
 
-            return {
-                crafted: true,
-                item,
-                quantity,
-                materialsUsed,
-                timeElapsed: Date.now() - startTime,
-                success: true
-            };
-        } catch (error: any) {
-            return {
-                crafted: false,
-                item,
-                quantity,
-                timeElapsed: Date.now() - startTime,
-                success: false,
-                error: error.message
-            };
+            return { success: true, message: `Crafted ${quantity} ${cleanItem}`, item: cleanItem, crafted: true };
+        } catch (err: any) {
+            return { success: false, error: `Craft failed: ${err.message}`, item: cleanItem, crafted: false };
         }
     }
 
-    async mineBlocks(blockType: string, count: number = 1, maxDistance: number = 32): Promise<any> {
-        if (!this.bot) throw new Error('Bot not connected');
+
+    async mineBlocks(blockType: string, count: number = 1): Promise<any> {
+        if (!this.bot) throw new Error("Bot not connected");
 
         const startTime = Date.now();
-        const mcData = require('minecraft-data')(this.bot.version);
-        const blockId = mcData.blocksByName[blockType]?.id;
+        const mcData = require("minecraft-data")(this.bot.version);
+
+        // Normalize block type
+        const cleanBlockType = blockType.replace(/^minecraft:/, "");
+        const blockId = mcData.blocksByName[cleanBlockType]?.id;
 
         if (!blockId) {
-            throw new Error(`Block type ${blockType} not found`);
+            throw new Error(`Block type ${blockType} not found in mcData`);
         }
 
-        const blocksFound: any[] = [];
         let mined = 0;
+        const blocksFound: any[] = [];
 
         try {
             while (mined < count) {
-                const block = this.bot.findBlock(blockId);
-                if (!block) {
-                    break; // No more blocks found
-                }
-
-                blocksFound.push({
-                    position: { x: block.position.x, y: block.position.y, z: block.position.z },
-                    name: block.name
+                // 🔍 Find nearest block of that type
+                const block = this.bot.findBlock({
+                    matching: blockId,
+                    maxDistance: 32,
                 });
 
+                if (!block) {
+                    break; // nothing nearby
+                }
+
+                blocksFound.push({ position: block.position, name: block.name });
+
+                // 🚶 Move closer if too far away
+                if (block.position.distanceTo(this.bot.entity.position) > 4) {
+                    await this.moveTo(block.position.x, block.position.y, block.position.z);
+                }
+
+                // 🔨 Equip best tool
+                const tool = this.getBestTool(block, mcData);
+                if (tool) {
+                    await this.bot.equip(tool, "hand");
+                } else {
+                    console.warn(
+                        `⚠️ No suitable tool found for ${block.name}, mining may fail.`
+                    );
+                }
+
+                // ⛏️ Check if block is mineable
+                if (!this.bot.canDigBlock(block)) {
+                    return {
+                        mined,
+                        requested: count,
+                        blocksFound,
+                        timeElapsed: Date.now() - startTime,
+                        success: false,
+                        error: `Cannot dig block: ${block.name} with current tool`,
+                    };
+                }
+
+                // 🪓 Mine it
                 await this.bot.dig(block);
                 mined++;
 
                 this.updateLastActivity();
-                this.io.emit('bot_state', this.getBotState());
+                this.io.emit("bot_state", this.getBotState());
             }
 
             return {
@@ -509,7 +567,7 @@ export class BotManager {
                 requested: count,
                 blocksFound,
                 timeElapsed: Date.now() - startTime,
-                success: mined > 0
+                success: mined > 0,
             };
         } catch (error: any) {
             return {
@@ -518,13 +576,47 @@ export class BotManager {
                 blocksFound,
                 timeElapsed: Date.now() - startTime,
                 success: false,
-                error: error.message
+                error: error.message,
             };
         }
     }
 
+    /**
+     * Selects the best tool available in inventory for the given block.
+     */
+    getBestTool(block: any, mcData: any) {
+        if (!block) return null;
+
+        const tools = this.bot?.inventory.items().filter((item) =>
+            item.name.includes("pickaxe") ||
+            item.name.includes("shovel") ||
+            item.name.includes("axe")
+        );
+
+        if (tools?.length === 0) return null;
+
+        // Example: prefer pickaxe for stone/cobblestone, axe for logs, shovel for sand/gravel
+        if (block.name.includes("stone") || block.name.includes("ore")) {
+            return tools?.find((t) => t.name.includes("pickaxe")) || null;
+        }
+        if (block.name.includes("log")) {
+            return tools?.find((t) => t.name.includes("axe")) || null;
+        }
+        if (block.name.includes("sand") || block.name.includes("gravel") || block.name.includes("dirt")) {
+            return tools?.find((t) => t.name.includes("shovel")) || null;
+        }
+
+        if (!tools || tools.length === 0) return null;
+
+        return tools[0];
+    }
+
+
+
     async collectItems(itemType?: string, radius: number = 16): Promise<any[]> {
         if (!this.bot) throw new Error('Bot not connected');
+
+
 
         const items = Object.values(this.bot.entities)
             .filter(entity => {
@@ -552,37 +644,108 @@ export class BotManager {
         return collected;
     }
 
-    async placeBlock(blockType: string, x: number, y: number, z: number, face: string = 'top'): Promise<any> {
+    async placeBlock(
+        blockType: string,
+        x?: number,
+        y?: number,
+        z?: number,
+        face: string = 'top'
+    ): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
 
         const mcData = require('minecraft-data')(this.bot.version);
         const blockItem = mcData.itemsByName[blockType];
-
         if (!blockItem) {
-            throw new Error(`Block item ${blockType} not found`);
+            return { success: false, error: `Block item ${blockType} not found in mcData`, blockType };
         }
 
-        const item = this.bot.inventory.findInventoryItem(blockItem.id, 1, false);
+        const item = this.bot.inventory.items().find(i => i.type === blockItem.id);
         if (!item) {
-            throw new Error(`No ${blockType} in inventory`);
+            return { success: false, error: `No ${blockType} in inventory`, blockType };
         }
 
         try {
-            const referenceBlock = this.bot.blockAt(new Vec3(x, y - 1, z)); // Block below target position
-            if (!referenceBlock) {
-                throw new Error('No reference block found');
+            await this.bot.equip(item, 'hand');
+
+            // Better positioning logic
+            let targetX = x ?? Math.floor(this.bot.entity.position.x);
+            let targetY = y ?? Math.floor(this.bot.entity.position.y);
+            let targetZ = z ?? Math.floor(this.bot.entity.position.z);
+
+            // If no specific coordinates provided, place in front of bot
+            if (x === undefined && y === undefined && z === undefined) {
+                const yaw = this.bot.entity.yaw;
+                targetX = Math.floor(this.bot.entity.position.x + Math.cos(yaw + Math.PI) * 2);
+                targetZ = Math.floor(this.bot.entity.position.z + Math.sin(yaw + Math.PI) * 2);
+                targetY = Math.floor(this.bot.entity.position.y);
             }
 
-            await this.bot.equip(item, 'hand');
-            await this.bot.placeBlock(referenceBlock, new Vec3(0, 1, 0));
+            // Find a solid reference block to place against
+            let referenceBlock = this.bot.blockAt(new Vec3(targetX, targetY - 1, targetZ));
+
+            // If no solid block below, try to find any nearby solid block
+            if (!referenceBlock || referenceBlock.name === 'air') {
+                // Search for nearby solid blocks
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        for (let dz = -1; dz <= 1; dz++) {
+                            const testBlock = this.bot.blockAt(new Vec3(targetX + dx, targetY + dy, targetZ + dz));
+                            if (testBlock && testBlock.name !== 'air' && testBlock.material !== 'plant') {
+                                referenceBlock = testBlock;
+                                targetX = referenceBlock.position.x;
+                                targetY = referenceBlock.position.y + 1;
+                                targetZ = referenceBlock.position.z;
+                                break;
+                            }
+                        }
+                        if (referenceBlock && referenceBlock.name !== 'air') break;
+                    }
+                    if (referenceBlock && referenceBlock.name !== 'air') break;
+                }
+            }
+
+            if (!referenceBlock || referenceBlock.name === 'air') {
+                return { success: false, error: 'No solid block found to place against', blockType };
+            }
+
+            // Check if target position is already occupied
+            const targetBlock = this.bot.blockAt(new Vec3(targetX, targetY, targetZ));
+            if (targetBlock && targetBlock.name !== 'air') {
+                return { success: false, error: `Target position ${targetX},${targetY},${targetZ} is already occupied by ${targetBlock.name}`, blockType };
+            }
+
+            const faceVectors: Record<string, Vec3> = {
+                top: new Vec3(0, 1, 0),
+                bottom: new Vec3(0, -1, 0),
+                north: new Vec3(0, 0, -1),
+                south: new Vec3(0, 0, 1),
+                west: new Vec3(-1, 0, 0),
+                east: new Vec3(1, 0, 0),
+            };
+
+            const faceVec = faceVectors[face] || new Vec3(0, 1, 0);
+
+            // Add timeout and better error handling
+            await Promise.race([
+                this.bot.placeBlock(referenceBlock, faceVec),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Placement timeout after 3 seconds')), 3000)
+                )
+            ]);
 
             this.updateLastActivity();
-            return { placed: true, blockType, position: { x, y, z } };
+            return {
+                success: true,
+                message: `Placed ${blockType} at ${targetX},${targetY},${targetZ}`,
+                blockType,
+                position: { x: targetX, y: targetY, z: targetZ },
+                face,
+                details: { placed: true }
+            };
         } catch (error: any) {
-            return { placed: false, blockType, error: error.message };
+            return { success: false, error: error.message, blockType };
         }
     }
-
     async useItem(x?: number, y?: number, z?: number, item?: string, face: string = 'top'): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
 
@@ -625,10 +788,10 @@ export class BotManager {
         const itemData = mcData.itemsByName[item];
 
         if (!itemData) {
-            throw new Error(`Item ${item} not found`);
+            throw new Error(`Item ${item} not found in mcData`);
         }
 
-        const inventoryItem = this.bot.inventory.findInventoryItem(itemData.id, 1, false);
+        const inventoryItem = this.bot.inventory.items().find(i => i.type === itemData.id);
         if (!inventoryItem) {
             throw new Error(`No ${item} in inventory`);
         }
@@ -642,17 +805,17 @@ export class BotManager {
         }
     }
 
-    async dropItem(item: string, quantity: number = 1): Promise<any> {
+    async dropItem(item: string, quantity: number): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
 
         const mcData = require('minecraft-data')(this.bot.version);
         const itemData = mcData.itemsByName[item];
 
         if (!itemData) {
-            throw new Error(`Item ${item} not found`);
+            throw new Error(`Item ${item} not found in mcData`);
         }
 
-        const inventoryItem = this.bot.inventory.findInventoryItem(itemData.id, quantity, false);
+        const inventoryItem = this.bot.inventory.items().find(i => i.type === itemData.id);
         if (!inventoryItem) {
             throw new Error(`No ${item} in inventory`);
         }
@@ -665,6 +828,7 @@ export class BotManager {
             return { dropped: false, item, error: error.message };
         }
     }
+
 
     getRecipes(item?: string): any[] {
         if (!this.bot) throw new Error('Bot not connected');
@@ -691,21 +855,30 @@ export class BotManager {
         try {
             if (continuous) {
                 this.bot.attack(entity);
-                // Set up continuous attack until entity is dead or out of range
+
                 const attackInterval = setInterval(() => {
                     const currentEntity = this.bot!.entities[entityId];
-                    if (!currentEntity || currentEntity.position.distanceTo(this.bot!.entity.position) > 8) {
+                    if (
+                        !currentEntity ||
+                        currentEntity.position.distanceTo(this.bot!.entity.position) > 8 ||
+                        (currentEntity.health !== undefined && currentEntity.health <= 0)
+                    ) {
                         clearInterval(attackInterval);
                         return;
                     }
                     this.bot!.attack(currentEntity);
                 }, 500);
             } else {
-                await this.bot.attack(entity);
+                this.bot.attack(entity);
             }
 
             this.updateLastActivity();
-            return { attacked: true, entityId, continuous, target: entity.name };
+            return {
+                attacked: true,
+                entityId,
+                continuous,
+                target: entity.name || entity.displayName || 'unknown'
+            };
         } catch (error: any) {
             return { attacked: false, entityId, error: error.message };
         }
@@ -714,7 +887,7 @@ export class BotManager {
     async attackNearestHostile(mobType?: string, radius: number = 16, continuous: boolean = false): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
 
-        const hostileMobs = ['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch'];
+        const hostileMobs = ['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'pillager'];
         const entities = Object.values(this.bot.entities)
             .filter(entity => {
                 if (entity.type !== 'mob') return false;
@@ -728,7 +901,7 @@ export class BotManager {
             );
 
         if (entities.length === 0) {
-            return { target: null, attacked: false };
+            return { target: null, attacked: false, reason: 'No hostiles found' };
         }
 
         const target = entities[0];
@@ -745,9 +918,47 @@ export class BotManager {
     }
 
     setDefensiveMode(enabled: boolean, radius: number = 8, aggressive: boolean = false): any {
+        if (!this.bot) throw new Error('Bot not connected');
+
         this.defensiveMode = enabled;
         this.defensiveRadius = radius;
         this.isAggressive = aggressive;
+
+        if (this._defensiveHandler) {
+            // remove old handler if already active
+            this.bot.removeListener('physicsTick', this._defensiveHandler);
+            this._defensiveHandler = null;
+        }
+
+        if (enabled) {
+            this._defensiveHandler = async () => {
+                try {
+                    const threats = this.getNearbyThreats(radius);
+
+                    if (threats.length === 0) return;
+
+                    const threatLevel = this.assessThreatLevel(threats);
+
+                    if (aggressive) {
+                        // Aggressive: attack nearest hostile
+                        const nearest = threats[0];
+                        await this.attackEntity(nearest.id, true);
+                    } else {
+                        // Defensive: flee instead of attacking
+                        if (threatLevel === 'HIGH' || threatLevel === 'MEDIUM') {
+                            await this.fleeFromHostiles(radius * 2);
+                        } else {
+                            // Raise shield if available
+                            await this.useShield(true);
+                        }
+                    }
+                } catch (err) {
+                    this.bot?.emit('error', new Error(`Defensive handler error: ${err}`));
+                }
+            };
+
+            this.bot.on('physicsTick', this._defensiveHandler);
+        }
 
         return {
             defensiveMode: this.defensiveMode,
@@ -755,6 +966,7 @@ export class BotManager {
             aggressive: this.isAggressive
         };
     }
+
 
     async fleeFromHostiles(distance: number = 16, direction?: string): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
@@ -793,7 +1005,13 @@ export class BotManager {
         if (!this.bot) throw new Error('Bot not connected');
 
         const mcData = require('minecraft-data')(this.bot.version);
-        const shield = this.bot.inventory.findInventoryItem(mcData.itemsByName.shield?.id, 1, false);
+        const shieldItem = mcData.itemsByName.shield;
+
+        if (!shieldItem) {
+            return { success: false, error: 'Shield not defined in mcData for this version' };
+        }
+
+        const shield = this.bot.inventory.items().find(i => i.type === shieldItem.id);
 
         if (!shield) {
             return { success: false, error: 'No shield in inventory' };
@@ -802,9 +1020,9 @@ export class BotManager {
         try {
             if (raised) {
                 await this.bot.equip(shield, 'off-hand');
-                this.bot.activateItem(); // Raise shield
+                this.bot.activateItem(); // raise shield
             } else {
-                this.bot.deactivateItem(); // Lower shield
+                this.bot.deactivateItem(); // lower shield
             }
 
             return { success: true, raised, shield: shield.name };
@@ -812,6 +1030,7 @@ export class BotManager {
             return { success: false, error: error.message };
         }
     }
+
 
     getNearbyThreats(radius: number = 16): any[] {
         if (!this.bot) return [];

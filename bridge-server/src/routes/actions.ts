@@ -13,22 +13,44 @@ export function actionRoutes(botManager: BotManager, io: SocketIOServer): Router
      * @access Public
      */
     router.post('/craft', validateCraftingInput, asyncHandler(async (req: Request, res: Response) => {
-        const { item, quantity = 1, requiresTable = false } = req.body;
+        const { item, quantity = 1 } = req.body; // removed requiresTable
 
         if (!botManager.isConnected()) {
-            return res.status(400).json({ error: 'Bot not connected' });
+            return res.status(400).json({
+                success: false,
+                error: 'Bot not connected'
+            });
         }
 
-        const result = await botManager.craftItem(item, quantity, requiresTable);
-        io.emit('crafting_completed', { item, quantity, result });
+        try {
+            const result = await botManager.craftItem(item, quantity);
 
-        res.json({
-            success: true,
-            message: `Crafted ${quantity} ${item}`,
-            item,
-            quantity,
-            details: result
-        });
+            if (result.success || result.crafted) {
+                io.emit('crafting_completed', { item, quantity, result });
+                return res.json({
+                    success: true,
+                    message: `Successfully crafted ${quantity} ${item}`,
+                    item,
+                    quantity,
+                    data: result
+                });
+            } else {
+                return res.json({
+                    success: false,
+                    error: result.error || `Failed to craft ${item}`,
+                    item,
+                    quantity,
+                    data: result
+                });
+            }
+        } catch (error: any) {
+            return res.json({
+                success: false,
+                error: error.message || 'Crafting failed',
+                item,
+                quantity
+            });
+        }
     }));
 
     /**
@@ -37,13 +59,13 @@ export function actionRoutes(botManager: BotManager, io: SocketIOServer): Router
      * @access Public
      */
     router.post('/mine', validateMiningInput, asyncHandler(async (req: Request, res: Response) => {
-        const { blockType, count = 1, maxDistance = 32 } = req.body;
+        const { blockType, count = 1 } = req.body;
 
         if (!botManager.isConnected()) {
             return res.status(400).json({ error: 'Bot not connected' });
         }
 
-        const result = await botManager.mineBlocks(blockType, count, maxDistance);
+        const result = await botManager.mineBlocks(blockType, count);
         io.emit('mining_completed', { blockType, count, result });
 
         res.json({
@@ -80,34 +102,25 @@ export function actionRoutes(botManager: BotManager, io: SocketIOServer): Router
     }));
 
     /**
-     * @route POST /place
-     * @desc Place blocks at specific location
-     * @access Public
-     */
+ * @route POST /place
+ * @desc Place blocks at specific location
+ * @access Public
+ */
     router.post('/place', asyncHandler(async (req: Request, res: Response) => {
-        const { blockType, x, y, z, face = 'top' } = req.body;
-
-        if (!blockType || x === undefined || y === undefined || z === undefined) {
-            return res.status(400).json({ error: 'blockType and coordinates (x,y,z) are required' });
+        const { blockType, count = 1, x, y, z, face = 'top' } = req.body;
+        if (!blockType) {
+            return res.status(400).json({ success: false, error: 'blockType is required' });
         }
-
         if (!botManager.isConnected()) {
-            return res.status(400).json({ error: 'Bot not connected' });
+            return res.status(400).json({ success: false, error: 'Bot not connected' });
         }
 
+        // If count > 1, place multiple blocks (you might want to implement this)
+        // For now, just place one block
         const result = await botManager.placeBlock(blockType, x, y, z, face);
-        io.emit('block_placed', { blockType, x, y, z, face, result });
-
-        res.json({
-            success: true,
-            message: `Placed ${blockType} at ${x}, ${y}, ${z}`,
-            blockType,
-            position: { x, y, z },
-            face,
-            details: result
-        });
+        io.emit('block_placed', { blockType, result });
+        res.json(result);
     }));
-
     /**
      * @route POST /use
      * @desc Use/right-click on a block or with an item

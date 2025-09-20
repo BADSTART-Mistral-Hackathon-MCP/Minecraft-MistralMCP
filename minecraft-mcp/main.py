@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Environment variables
-BOT_API_URL = os.getenv('BOT_API_URL', 'http://localhost:3000')
+BOT_API_URL = os.getenv('BOT_API_URL', 'http://localhost:3001')
 MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
 BOT_NAME = os.getenv('BOT_NAME', 'AIBot')
 
@@ -63,8 +63,14 @@ class Position(BaseModel):
 
 class BotResponse(BaseModel):
     success: bool
-    message: str
+    message: Optional[str] = None
+    error: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
+    
+    @property
+    def message_or_error(self) -> str:
+        """Get message for success or error for failures"""
+        return self.message or self.error or "Unknown response"
 
 
 class MCPBotServer:
@@ -98,8 +104,17 @@ Available actions (use exact syntax):
 - moveTo(x, y, z) - Move to coordinates 
 - say("message") - Say something (handled automatically)
 - attackEntity(entityId) - Attack an entity
-- mineBlock("blockType") - Mine blocks
+- mineBlock("blockType") - Mine blocks (common types: oak_log, stone, coal_ore, iron_ore, dirt, cobblestone)
 - craftItem("itemName") - Craft items
+- placeBlock("blockType") - Place blocks
+- collectBlock("blockType") - Collect blocks
+- dropItem("itemName") - Drop items
+- equipItem("itemName") - Equip items
+- useItem("itemName") - Use items
+- recipeItem("itemName") - Get recipe for items
+- attackNearestEntity() - Attack nearest hostile entity
+- defend() - Defensive stance
+- flee() - Flee from danger
 - stopActivity() - Stop current action
 
 IMPORTANT: When you want to perform actions, include them in your response using the exact function syntax above. You can combine conversational text with actions.
@@ -108,6 +123,7 @@ Examples:
 - "Sure, I'll follow you! followPlayer('{context.split(':')[0] if ':' in context else 'player'}')"
 - "Let me come to you! followPlayer('{context.split(':')[0] if ':' in context else 'player'}')"
 - "I'll mine some wood for you. mineBlock('oak_log')"
+- "Looking for wood! mineBlock('oak_log')"
 
 Current context: {context}
 
@@ -130,11 +146,18 @@ Respond naturally but include appropriate action functions when needed. Be conve
                 max_tokens=500
             )
 
-            return response.choices[0].message.content
+            # Check if response is None or empty
+            content = response.choices[0].message.content
+            if content is None or content.strip() == "":
+                logger.warning("Mistral returned empty response, using fallback")
+                return "I'll help you with that!"
+            
+            return content.strip()
+            
         except Exception as e:
             logger.error(f"Mistral API error: {e}")
             logger.error(f"Mistral client type: {type(mistral_client)}")
-            logger.error(f"Mistral client dir: {dir(mistral_client)}")
+            logger.error(f"Response object: {response if 'response' in locals() else 'No response'}")
             return f"Sorry, I encountered an error processing your request: {str(e)}"
 
     def setup_tools(self):
@@ -143,14 +166,26 @@ Respond naturally but include appropriate action functions when needed. Be conve
         # Define functions first, then register them
         async def move_to(x: float, y: float, z: float) -> BotResponse:
             result = await self.bot_api_request('POST', '/moveTo', {'x': x, 'y': y, 'z': z})
+            if 'success' not in result:
+                result['success'] = True
+            if not result.get('success', False) and 'error' in result and 'message' not in result:
+                result['message'] = result['error']
             return BotResponse(**result)
 
         async def follow_player(username: str) -> BotResponse:
             result = await self.bot_api_request('POST', '/followPlayer', {'username': username})
+            if 'success' not in result:
+                result['success'] = True
+            if not result.get('success', False) and 'error' in result and 'message' not in result:
+                result['message'] = result['error']
             return BotResponse(**result)
 
         async def say(message: str) -> BotResponse:
             result = await self.bot_api_request('POST', '/say', {'message': message})
+            if 'success' not in result:
+                result['success'] = True
+            if not result.get('success', False) and 'error' in result and 'message' not in result:
+                result['message'] = result['error']
             return BotResponse(**result)
 
         async def get_status() -> Dict[str, Any]:
@@ -165,6 +200,54 @@ Respond naturally but include appropriate action functions when needed. Be conve
 
         async def mine_block(blockType: str, count: int = 1) -> BotResponse:
             result = await self.bot_api_request('POST', '/mine', {'blockType': blockType, 'count': count})
+            return BotResponse(**result)
+        
+        async def place_block(blockType: str, count: int = 1) -> BotResponse:
+            result = await self.bot_api_request('POST', '/place', {'blockType': blockType, 'count': count})
+            # Ensure we always have a success field
+            if 'success' not in result:
+                result['success'] = result.get('placed', False)
+            # Convert error to message for failed responses  
+            if not result.get('success', False) and 'error' in result and 'message' not in result:
+                result['message'] = result['error']
+            return BotResponse(**result)
+
+        async def collect_block(blockType: str, count: int = 1) -> BotResponse:
+            result = await self.bot_api_request('POST', '/collect', {'blockType': blockType, 'count': count})
+            # Ensure we always have a success field
+            if 'success' not in result:
+                result['success'] = True  # assume success if no explicit success field
+            # Convert error to message for failed responses
+            if not result.get('success', False) and 'error' in result and 'message' not in result:
+                result['message'] = result['error']
+            return BotResponse(**result)
+        
+        async def drop_item(item: str, count: int = 1) -> BotResponse:
+            result = await self.bot_api_request('POST', '/drop', {'item': item, 'count': count})
+            return BotResponse(**result)
+        
+        async def equip_item(item: str) -> BotResponse:
+            result = await self.bot_api_request('POST', '/equip', {'item': item})
+            return BotResponse(**result)
+
+        async def recipe_item(item: str) -> BotResponse:
+            result = await self.bot_api_request('POST', '/recipe', {'item': item})
+            return BotResponse(**result)
+
+        async def attack_nearest_entity() -> BotResponse:
+            result = await self.bot_api_request('POST', '/attackNearest')
+            return BotResponse(**result)
+        
+        async def defend() -> BotResponse:
+            result = await self.bot_api_request('POST', '/defend')
+            return BotResponse(**result)
+        
+        async def flee() -> BotResponse:
+            result = await self.bot_api_request('POST', '/flee')
+            return BotResponse(**result)
+        
+        async def use_item(item: str) -> BotResponse:
+            result = await self.bot_api_request('POST', '/use', {'item': item})
             return BotResponse(**result)
 
         async def attack_entity(entityId: int) -> BotResponse:
@@ -185,6 +268,15 @@ Respond naturally but include appropriate action functions when needed. Be conve
         self.get_status = get_status
         self.craft_item = craft_item
         self.mine_block = mine_block
+        self.place_block = place_block
+        self.collect_block = collect_block
+        self.drop_item = drop_item
+        self.equip_item = equip_item
+        self.recipe_item = recipe_item
+        self.attack_nearest_entity = attack_nearest_entity
+        self.defend = defend    
+        self.flee = flee
+        self.use_item = use_item
         self.attack_entity = attack_entity
         self.stop_activity = stop_activity
         self.process_chat_command = process_chat_command
@@ -196,6 +288,15 @@ Respond naturally but include appropriate action functions when needed. Be conve
         self.mcp.tool()(get_status)
         self.mcp.tool()(craft_item)
         self.mcp.tool()(mine_block)
+        self.mcp.tool()(place_block)
+        self.mcp.tool()(collect_block)
+        self.mcp.tool()(drop_item)
+        self.mcp.tool()(equip_item)
+        self.mcp.tool()(recipe_item)
+        self.mcp.tool()(attack_nearest_entity)
+        self.mcp.tool()(defend)
+        self.mcp.tool()(flee)
+        self.mcp.tool()(use_item)
         self.mcp.tool()(attack_entity)
         self.mcp.tool()(stop_activity)
         self.mcp.tool()(process_chat_command)
@@ -225,7 +326,9 @@ Respond naturally but include appropriate action functions when needed. Be conve
 
         elif 'follow me' in lower_msg or f'follow {username}' in lower_msg:
             result = await self.follow_player(username)
-            await self.say(f"Following {username}!" if result.success else f"Can't follow: {result.message}")
+            message = result.message_or_error if isinstance(result, BotResponse) else str(result)
+            success = result.success if isinstance(result, BotResponse) else True
+            await self.say(f"Following {username}!" if success else f"Can't follow: {message}")
             return "Follow command executed"
 
         elif 'stop' in lower_msg:
@@ -253,16 +356,29 @@ Respond naturally but include appropriate action functions when needed. Be conve
 
     async def parse_and_execute_actions(self, ai_response: str, username: str):
         """Parse AI response and execute any actions found"""
+        # Handle None response
+        if ai_response is None:
+            return []
+            
         import re
         
-        # Define action patterns
+        # Define action patterns with correct mappings
         action_patterns = {
-            r'followPlayer\("([^"]+)"\)|followPlayer\(([^,)]+)\)': lambda match: self.follow_player(match.group(1) or match.group(2)),
-            r'moveTo\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)': lambda match: self.move_to(float(match.group(1)), float(match.group(2)), float(match.group(3))),
-            r'attack\((\d+)\)|attackEntity\((\d+)\)': lambda match: self.attack_entity(int(match.group(1) or match.group(2))),
-            r'mine\("([^"]+)"\)|mineBlock\("([^"]+)"\)': lambda match: self.mine_block(match.group(1) or match.group(2)),
-            r'craft\("([^"]+)"\)|craftItem\("([^"]+)"\)': lambda match: self.craft_item(match.group(1) or match.group(2)),
-            r'stop\(\)|stopActivity\(\)': lambda match: self.stop_activity(),
+            r'followPlayer\("([^"]+)"\)|followPlayer\(([^,)]+)\)': self.execute_follow_player,
+            r'moveTo\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)': self.execute_move_to,
+            r'attack\((\d+)\)|attackEntity\((\d+)\)': self.execute_attack_entity,
+            r'mine\("([^"]+)"\)|mineBlock\("([^"]+)"\)': self.execute_mine_block,
+            r'place\("([^"]+)"\)|placeBlock\("([^"]+)"\)': self.execute_place_block,
+            r'collect\("([^"]+)"\)|collectBlock\("([^"]+)"\)': self.execute_collect_block,
+            r'drop\("([^"]+)"\)|dropItem\("([^"]+)"\)': self.execute_drop_item,
+            r'equip\("([^"]+)"\)|equipItem\("([^"]+)"\)': self.execute_equip_item,
+            r'recipe\("([^"]+)"\)|recipeItem\("([^"]+)"\)': self.execute_recipe_item,
+            r'use\("([^"]+)"\)|useItem\("([^"]+)"\)': self.execute_use_item,
+            r'craft\("([^"]+)"\)|craftItem\("([^"]+)"\)': self.execute_craft_item,
+            r'attackNearestEntity\(\)': self.execute_attack_nearest_entity,
+            r'defend\(\)': self.execute_defend,
+            r'flee\(\)': self.execute_flee,
+            r'stop\(\)|stopActivity\(\)': self.execute_stop_activity,
         }
         
         actions_executed = []
@@ -271,22 +387,121 @@ Respond naturally but include appropriate action functions when needed. Be conve
             matches = re.finditer(pattern, ai_response, re.IGNORECASE)
             for match in matches:
                 try:
-                    result = await action_func(match)
-                    actions_executed.append(f"{pattern.split('(')[0]}: {result}")
+                    result = await action_func(match, username)
+                    actions_executed.append(result)
                     logger.info(f"Executed action from AI: {match.group(0)} -> {result}")
                 except Exception as e:
-                    logger.error(f"Failed to execute action {match.group(0)}: {e}")
+                    error_msg = f"Failed to execute {match.group(0)}: {str(e)}"
+                    logger.error(error_msg)
+                    actions_executed.append(error_msg)
         
         # Special handling for follow me commands in natural language
         if any(phrase in ai_response.lower() for phrase in ['i will follow', 'following you', 'coming to you']):
             try:
                 result = await self.follow_player(username)
-                actions_executed.append(f"followPlayer: {result}")
+                message = result.message_or_error if isinstance(result, BotResponse) else str(result)
+                action_result = f"followPlayer({username}): {message}"
+                actions_executed.append(action_result)
                 logger.info(f"Executed natural language follow command for {username}")
             except Exception as e:
-                logger.error(f"Failed to execute follow command: {e}")
+                error_msg = f"Failed to execute follow command: {str(e)}"
+                logger.error(error_msg)
+                actions_executed.append(error_msg)
         
         return actions_executed
+
+    # Execution methods for action parsing
+    async def execute_follow_player(self, match, username: str):
+        target = match.group(1) or match.group(2) or username
+        target = target.strip()
+        result = await self.follow_player(target)
+        return f"followPlayer({target}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_move_to(self, match, username: str):
+        x, y, z = float(match.group(1)), float(match.group(2)), float(match.group(3))
+        result = await self.move_to(x, y, z)
+        return f"moveTo({x}, {y}, {z}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_attack_entity(self, match, username: str):
+        entity_id = int(match.group(1) or match.group(2))
+        result = await self.attack_entity(entity_id)
+        return f"attackEntity({entity_id}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_mine_block(self, match, username: str):
+        block_type = match.group(1) or match.group(2)
+        result = await self.mine_block(block_type)
+        
+        # Add detailed feedback for mining
+        if isinstance(result, BotResponse):
+            if not result.success:
+                await self.say(f"I couldn't find any {block_type} blocks nearby. Maybe you need to show me where they are?")
+            elif result.data and 'mined' in str(result.data):
+                mined_count = result.data.get('mined', 0) if isinstance(result.data, dict) else 0
+                if mined_count > 0:
+                    await self.say(f"Successfully mined {mined_count} {block_type}!")
+                else:
+                    await self.say(f"I couldn't find any {block_type} blocks to mine.")
+        
+        return f"mineBlock({block_type}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_place_block(self, match, username: str):
+        block_type = match.group(1) or match.group(2)
+        result = await self.place_block(block_type)
+        
+        # Add user feedback for place operations
+        if isinstance(result, BotResponse):
+            if result.success:
+                await self.say(f"Placed {block_type} successfully!")
+            else:
+                await self.say(f"Failed to place {block_type}: {result.message_or_error}")
+        
+        return f"placeBlock({block_type}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_collect_block(self, match, username: str):
+        block_type = match.group(1) or match.group(2)
+        result = await self.collect_block(block_type)
+        return f"collectBlock({block_type}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+    
+    async def execute_drop_item(self, match, username: str):
+        item = match.group(1) or match.group(2)
+        result = await self.drop_item(item)
+        return f"dropItem({item}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_equip_item(self, match, username: str):
+        item = match.group(1) or match.group(2)
+        result = await self.equip_item(item)
+        return f"equipItem({item}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_recipe_item(self, match, username: str):
+        item = match.group(1) or match.group(2)
+        result = await self.recipe_item(item)
+        return f"recipeItem({item}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_use_item(self, match, username: str):
+        item = match.group(1) or match.group(2)
+        result = await self.use_item(item)
+        return f"useItem({item}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_craft_item(self, match, username: str):
+        item = match.group(1) or match.group(2)
+        result = await self.craft_item(item)
+        return f"craftItem({item}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_attack_nearest_entity(self, match, username: str):
+        result = await self.attack_nearest_entity()
+        return f"attackNearestEntity(): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_defend(self, match, username: str):
+        result = await self.defend()
+        return f"defend(): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_flee(self, match, username: str):
+        result = await self.flee()
+        return f"flee(): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+
+    async def execute_stop_activity(self, match, username: str):
+        result = await self.stop_activity()
+        return f"stopActivity(): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
 
     def extract_conversational_response(self, ai_response: str) -> str:
         """Extract the conversational part from AI response, removing action calls"""
@@ -300,8 +515,23 @@ Respond naturally but include appropriate action functions when needed. Be conve
             r'attackEntity\([^)]+\)',
             r'mine\([^)]+\)',
             r'mineBlock\([^)]+\)',
+            r'collect\([^)]+\)',
+            r'collectBlock\([^)]+\)',
+            r'place\([^)]+\)',
+            r'placeBlock\([^)]+\)',
+            r'drop\([^)]+\)',
+            r'dropItem\([^)]+\)',
+            r'equip\([^)]+\)',
+            r'equipItem\([^)]+\)',
+            r'use\([^)]+\)',
+            r'useItem\([^)]+\)',
+            r'recipe\([^)]+\)',
+            r'recipeItem\([^)]+\)',
             r'craft\([^)]+\)',
             r'craftItem\([^)]+\)',
+            r'attackNearestEntity\(\)',
+            r'defend\(\)',
+            r'flee\(\)',
             r'stop\(\)',
             r'stopActivity\(\)',
         ]
@@ -312,93 +542,7 @@ Respond naturally but include appropriate action functions when needed. Be conve
         
         # Clean up extra whitespace and punctuation
         clean_response = re.sub(r'\s+', ' ', clean_response).strip()
-        clean_response = re.sub(r'[,\s]*', '', clean_response).strip()
-
-    async def setup_websocket_connection(self):
-        @sio.event
-        async def connect():
-            logger.info("Connected to bot API WebSocket")
-
-        @sio.event
-        async def disconnect():
-            logger.info("Disconnected from bot API WebSocket")
-
-        @sio.event
-        async def bot_state(data):
-            bot_context.update_state(data)
-            logger.debug(f"Bot state updated: {data}")
-
-        @sio.event
-        async def chat_message(data):
-            username = data.get('username')
-            message = data.get('message')
-            if username != BOT_NAME:
-                try:
-                    # Call the internal processing function
-                    response = await self.process_chat_internal(username, message)
-                    logger.info(f"Processed chat from {username}: {message} -> {response}")
-                except Exception as e:
-                    logger.error(f"Error processing chat: {e}")
-
-        @sio.event
-        async def error(data):
-            logger.error(f"Bot API error: {data}")
-
-        @sio.event
-        async def goal_reached(data):
-            logger.info(f"Goal reached: {data}")
-
-        try:
-            await sio.connect(f"{BOT_API_URL.replace('http', 'ws')}")
-        except Exception as e:
-            logger.error(f"Failed to connect to WebSocket: {e}")
-
-    def run_mcp_server(self):
-        """Run MCP server in a separate thread"""
-        def mcp_thread():
-            # Create a new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                logger.info("Starting MCP server in separate thread...")
-                loop.run_until_complete(self.mcp.run())
-            except Exception as e:
-                logger.error(f"MCP server error: {e}")
-            finally:
-                loop.close()
-
-        # Start MCP server in a separate thread
-        mcp_thread_obj = threading.Thread(target=mcp_thread, daemon=True)
-        mcp_thread_obj.start()
-        return mcp_thread_obj
-
-    async def start(self):
-        # Start MCP server in separate thread first
-        mcp_thread = self.run_mcp_server()
-        
-        # Give the MCP server a moment to start
-        await asyncio.sleep(1)
-        
-        # Then setup WebSocket connection in main thread
-        await self.setup_websocket_connection()
-        
-        # Keep the main thread alive
-        logger.info("Bot server started successfully!")
-        try:
-            while True:
-                await asyncio.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Shutting down...")
-            await sio.disconnect()
-            await self.http_client.aclose()
-
-
-async def main():
-    server = MCPBotServer()
-    await server.start()
-
-if __name__ == "__main__":
-    asyncio.run(main()), '', clean_response
+        return clean_response
 
     async def setup_websocket_connection(self):
         @sio.event
