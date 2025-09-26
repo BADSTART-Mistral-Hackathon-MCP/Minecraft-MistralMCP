@@ -26,7 +26,6 @@ BOT_NAME = os.getenv('BOT_NAME', 'AIBot')
 if not MISTRAL_API_KEY:
     raise ValueError("MISTRAL_API_KEY environment variable is required")
 
-# Initialize clients
 mistral_client = Mistral(api_key=MISTRAL_API_KEY)
 sio = socketio.AsyncClient()
 
@@ -104,11 +103,11 @@ Available actions (use exact syntax):
 - moveTo(x, y, z) - Move to coordinates 
 - say("message") - Say something (handled automatically)
 - attackEntity(entityId) - Attack an entity
-- mineBlock("blockType") - Mine blocks (common types: oak_log, stone, coal_ore, iron_ore, dirt, cobblestone)
-- craftItem("itemName") - Craft items
-- placeBlock("blockType") - Place blocks
-- collectBlock("blockType") - Collect blocks
-- dropItem("itemName") - Drop items
+- mineBlock("blockType", count) - Mine blocks (common types: oak_log, stone, coal_ore, iron_ore, dirt, cobblestone)
+- craftItem("itemName", count) - Craft items
+- placeBlock("blockType", count) - Place blocks
+- collectBlock("blockType", count) - Collect blocks
+- dropItem("itemName", count) - Drop items
 - equipItem("itemName") - Equip items
 - useItem("itemName") - Use items
 - recipeItem("itemName") - Get recipe for items
@@ -122,8 +121,8 @@ IMPORTANT: When you want to perform actions, include them in your response using
 Examples:
 - "Sure, I'll follow you! followPlayer('{context.split(':')[0] if ':' in context else 'player'}')"
 - "Let me come to you! followPlayer('{context.split(':')[0] if ':' in context else 'player'}')"
-- "I'll mine some wood for you. mineBlock('oak_log')"
-- "Looking for wood! mineBlock('oak_log')"
+- "I'll mine some wood for you. mineBlock('oak_log', 10)"
+- "Looking for wood! mineBlock('oak_log', 10)"
 
 Current context: {context}
 
@@ -140,12 +139,15 @@ Respond naturally but include appropriate action functions when needed. Be conve
                 {"role": "user", "content": user_message}
             ]
 
-            response = mistral_client.chat.complete(
-                model="mistral-large-latest",
-                messages=messages,
-                max_tokens=500
+            # Run sync Mistral client in a worker thread to avoid blocking the event loop
+            response = await asyncio.to_thread(
+                lambda: mistral_client.chat.complete(
+                    model="mistral-large-latest",
+                    messages=messages,
+                    max_tokens=500
+                )
             )
-
+            
             # Check if response is None or empty
             content = response.choices[0].message.content
             if content is None or content.strip() == "":
@@ -194,36 +196,27 @@ Respond naturally but include appropriate action functions when needed. Be conve
                 bot_context.update_state(result)
             return result
 
-        async def craft_item(item: str, quantity: int = 1) -> BotResponse:
+        async def craft_item(item: str, quantity: int) -> BotResponse:
             result = await self.bot_api_request('POST', '/craft', {'item': item, 'quantity': quantity})
             return BotResponse(**result)
 
-        async def mine_block(blockType: str, count: int = 1) -> BotResponse:
-            result = await self.bot_api_request('POST', '/mine', {'blockType': blockType, 'count': count})
+        async def mine_block(blockType: str, count: int, preferredTool: Optional[str] = None) -> BotResponse:
+            result = await self.bot_api_request('POST', '/mine', {'blockType': blockType, 'count': count, 'preferredTool': preferredTool})
             return BotResponse(**result)
         
-        async def place_block(blockType: str, count: int = 1) -> BotResponse:
-            result = await self.bot_api_request('POST', '/place', {'blockType': blockType, 'count': count})
-            # Ensure we always have a success field
-            if 'success' not in result:
-                result['success'] = result.get('placed', False)
-            # Convert error to message for failed responses  
-            if not result.get('success', False) and 'error' in result and 'message' not in result:
-                result['message'] = result['error']
+        async def place_block(blockType: str, count: int, x: Optional[float] = None, y: Optional[float] = None, z: Optional[float] = None, face: str = 'top') -> BotResponse:
+            result = await self.bot_api_request('POST', '/place', {'blockType': blockType, 'count': count, 'x': x, 'y': y, 'z': z, 'face': face})
             return BotResponse(**result)
 
-        async def collect_block(blockType: str, count: int = 1) -> BotResponse:
-            result = await self.bot_api_request('POST', '/collect', {'blockType': blockType, 'count': count})
-            # Ensure we always have a success field
-            if 'success' not in result:
-                result['success'] = True  # assume success if no explicit success field
-            # Convert error to message for failed responses
-            if not result.get('success', False) and 'error' in result and 'message' not in result:
-                result['message'] = result['error']
+        async def collect_items(itemType: Optional[str] = None, radius: int = 16) -> BotResponse:
+            payload: Dict[str, Any] = {'radius': radius}
+            if itemType:
+                payload['itemType'] = itemType
+            result = await self.bot_api_request('POST', '/collect', payload)
             return BotResponse(**result)
         
-        async def drop_item(item: str, count: int = 1) -> BotResponse:
-            result = await self.bot_api_request('POST', '/drop', {'item': item, 'count': count})
+        async def drop_item(item: str, quantity: int) -> BotResponse:
+            result = await self.bot_api_request('POST', '/drop', {'item': item, 'quantity': quantity})
             return BotResponse(**result)
         
         async def equip_item(item: str) -> BotResponse:
@@ -232,6 +225,10 @@ Respond naturally but include appropriate action functions when needed. Be conve
 
         async def recipe_item(item: str) -> BotResponse:
             result = await self.bot_api_request('POST', '/recipe', {'item': item})
+            return BotResponse(**result)
+
+        async def use_item(item: str) -> BotResponse:
+            result = await self.bot_api_request('POST', '/use', {'item': item})
             return BotResponse(**result)
 
         async def attack_nearest_entity() -> BotResponse:
@@ -246,16 +243,22 @@ Respond naturally but include appropriate action functions when needed. Be conve
             result = await self.bot_api_request('POST', '/flee')
             return BotResponse(**result)
         
-        async def use_item(item: str) -> BotResponse:
-            result = await self.bot_api_request('POST', '/use', {'item': item})
+        async def stop_activity() -> BotResponse:
+            result = await self.bot_api_request('POST', '/stop')
             return BotResponse(**result)
+        
+        async def attack_any(mobType: Optional[str] = None, radius: int = 16, continuous: Optional[bool] = None) -> BotResponse:
+            payload: Dict[str, Any] = {'entityId': 'any', 'radius': radius}
+            if mobType:
+                payload['mobType'] = mobType
+            if continuous is not None:
+                payload['continuous'] = continuous
+            result = await self.bot_api_request('POST', '/attack', payload)
+            return BotResponse(**result)
+        
 
         async def attack_entity(entityId: int) -> BotResponse:
             result = await self.bot_api_request('POST', '/attack', {'entityId': entityId})
-            return BotResponse(**result)
-
-        async def stop_activity() -> BotResponse:
-            result = await self.bot_api_request('POST', '/stop')
             return BotResponse(**result)
 
         async def process_chat_command(username: str, message: str) -> str:
@@ -269,7 +272,7 @@ Respond naturally but include appropriate action functions when needed. Be conve
         self.craft_item = craft_item
         self.mine_block = mine_block
         self.place_block = place_block
-        self.collect_block = collect_block
+        self.collect_items = collect_items
         self.drop_item = drop_item
         self.equip_item = equip_item
         self.recipe_item = recipe_item
@@ -277,6 +280,7 @@ Respond naturally but include appropriate action functions when needed. Be conve
         self.defend = defend    
         self.flee = flee
         self.use_item = use_item
+        self.attack_any = attack_any
         self.attack_entity = attack_entity
         self.stop_activity = stop_activity
         self.process_chat_command = process_chat_command
@@ -289,7 +293,7 @@ Respond naturally but include appropriate action functions when needed. Be conve
         self.mcp.tool()(craft_item)
         self.mcp.tool()(mine_block)
         self.mcp.tool()(place_block)
-        self.mcp.tool()(collect_block)
+        self.mcp.tool()(collect_items)
         self.mcp.tool()(drop_item)
         self.mcp.tool()(equip_item)
         self.mcp.tool()(recipe_item)
@@ -297,6 +301,7 @@ Respond naturally but include appropriate action functions when needed. Be conve
         self.mcp.tool()(defend)
         self.mcp.tool()(flee)
         self.mcp.tool()(use_item)
+        self.mcp.tool()(attack_any)
         self.mcp.tool()(attack_entity)
         self.mcp.tool()(stop_activity)
         self.mcp.tool()(process_chat_command)
@@ -367,9 +372,11 @@ Respond naturally but include appropriate action functions when needed. Be conve
             r'followPlayer\("([^"]+)"\)|followPlayer\(([^,)]+)\)': self.execute_follow_player,
             r'moveTo\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)': self.execute_move_to,
             r'attack\((\d+)\)|attackEntity\((\d+)\)': self.execute_attack_entity,
+            r'attack\(\s*\)|attackEntity\(\s*\)': self.execute_attack_any,
+            r'attack\(any\)|attackEntity\(any\)': self.execute_attack_any,
             r'mine\("([^"]+)"\)|mineBlock\("([^"]+)"\)': self.execute_mine_block,
             r'place\("([^"]+)"\)|placeBlock\("([^"]+)"\)': self.execute_place_block,
-            r'collect\("([^"]+)"\)|collectBlock\("([^"]+)"\)': self.execute_collect_block,
+            r'collect\("([^"]+)"\)|collectBlock\("([^"]+)"\)': self.execute_collect_items,
             r'drop\("([^"]+)"\)|dropItem\("([^"]+)"\)': self.execute_drop_item,
             r'equip\("([^"]+)"\)|equipItem\("([^"]+)"\)': self.execute_equip_item,
             r'recipe\("([^"]+)"\)|recipeItem\("([^"]+)"\)': self.execute_recipe_item,
@@ -426,10 +433,16 @@ Respond naturally but include appropriate action functions when needed. Be conve
         entity_id = int(match.group(1) or match.group(2))
         result = await self.attack_entity(entity_id)
         return f"attackEntity({entity_id}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
+    
+    async def execute_attack_any(self, match, username: str):
+        result = await self.attack_any()
+        return f"attack(any): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
 
     async def execute_mine_block(self, match, username: str):
         block_type = match.group(1) or match.group(2)
-        result = await self.mine_block(block_type)
+        count = int(match.group(2) or match.group(4) or 1)
+        preferred_tool = match.group(5)
+        result = await self.mine_block(block_type, count, preferred_tool)
         
         # Add detailed feedback for mining
         if isinstance(result, BotResponse):
@@ -446,7 +459,10 @@ Respond naturally but include appropriate action functions when needed. Be conve
 
     async def execute_place_block(self, match, username: str):
         block_type = match.group(1) or match.group(2)
-        result = await self.place_block(block_type)
+        count = int(match.group(2) or match.group(4) or 1)
+        x, y, z = float(match.group(1)), float(match.group(2)), float(match.group(3))
+        face = match.group(4)
+        result = await self.place_block(block_type, count, x, y, z, face)
         
         # Add user feedback for place operations
         if isinstance(result, BotResponse):
@@ -457,14 +473,15 @@ Respond naturally but include appropriate action functions when needed. Be conve
         
         return f"placeBlock({block_type}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
 
-    async def execute_collect_block(self, match, username: str):
+    async def execute_collect_items(self, match, username: str):
         block_type = match.group(1) or match.group(2)
-        result = await self.collect_block(block_type)
+        result = await self.collect_items(block_type, quantity)
         return f"collectBlock({block_type}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
     
     async def execute_drop_item(self, match, username: str):
         item = match.group(1) or match.group(2)
-        result = await self.drop_item(item)
+        quantity = int(match.group(2) or match.group(4) or 1)
+        result = await self.drop_item(item, quantity)
         return f"dropItem({item}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
 
     async def execute_equip_item(self, match, username: str):
@@ -484,7 +501,8 @@ Respond naturally but include appropriate action functions when needed. Be conve
 
     async def execute_craft_item(self, match, username: str):
         item = match.group(1) or match.group(2)
-        result = await self.craft_item(item)
+        quantity = int(match.group(2) or match.group(4) or 1)
+        result = await self.craft_item(item, quantity)
         return f"craftItem({item}): {result.message_or_error if isinstance(result, BotResponse) else str(result)}"
 
     async def execute_attack_nearest_entity(self, match, username: str):
@@ -579,7 +597,7 @@ Respond naturally but include appropriate action functions when needed. Be conve
             logger.info(f"Goal reached: {data}")
 
         try:
-            await sio.connect(f"{BOT_API_URL.replace('http', 'ws')}")
+            await sio.connect(BOT_API_URL)
         except Exception as e:
             logger.error(f"Failed to connect to WebSocket: {e}")
 

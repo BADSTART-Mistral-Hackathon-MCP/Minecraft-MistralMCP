@@ -59,14 +59,25 @@ export function actionRoutes(botManager: BotManager, io: SocketIOServer): Router
      * @access Public
      */
     router.post('/mine', validateMiningInput, asyncHandler(async (req: Request, res: Response) => {
-        const { blockType, count = 1 } = req.body;
+        const { blockType, count = 1, preferredTool } = req.body;
 
         if (!botManager.isConnected()) {
             return res.status(400).json({ error: 'Bot not connected' });
         }
 
-        const result = await botManager.mineBlocks(blockType, count);
+        const result = await botManager.mineBlocks(blockType, count, preferredTool);
         io.emit('mining_completed', { blockType, count, result });
+
+        if (!result.success || result.mined === 0) {
+            return res.status(400).json({
+                success: false,
+                message: result.error || `No ${blockType} blocks mined`,
+                blockType,
+                requested: count,
+                mined: result.mined || 0,
+                details: result
+            });
+        }
 
         res.json({
             success: true,

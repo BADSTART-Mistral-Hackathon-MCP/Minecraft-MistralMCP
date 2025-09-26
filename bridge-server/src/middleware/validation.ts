@@ -70,6 +70,15 @@ export function validateMiningInput(req: Request, res: Response, next: NextFunct
         errors.push({ field: 'maxDistance', message: 'Max distance must be a number between 1 and 128', value: maxDistance });
     }
 
+    // Optional tool preference: axe, pickaxe, shovel
+    const { preferredTool } = req.body;
+    if (preferredTool !== undefined) {
+        const allowed = ['axe', 'pickaxe', 'shovel'];
+        if (typeof preferredTool !== 'string' || !allowed.some(t => preferredTool.toLowerCase().includes(t))) {
+            errors.push({ field: 'preferredTool', message: 'preferredTool must be one of: axe, pickaxe, shovel', value: preferredTool });
+        }
+    }
+
     if (errors.length > 0) {
         return res.status(400).json({
             success: false,

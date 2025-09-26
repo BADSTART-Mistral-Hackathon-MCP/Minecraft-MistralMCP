@@ -16,6 +16,8 @@ export class BotManager {
     private defensiveRadius = 8;
     private isAggressive = false;
     private _defensiveHandler: (() => Promise<void>) | null = null;
+    private attackIntervals: Record<number, NodeJS.Timeout> = {};
+    private readonly HOSTILE_MOBS = ['zombie','skeleton','creeper','spider','enderman','witch','pillager','husk','drowned','zombified_piglin','stray','phantom','vindicator','evoker','ravager','guardian','elder_guardian','hoglin','zoglin','slime','magma_cube','silverfish','shulker'];
 
     constructor(io: SocketIOServer) {
         this.io = io;
@@ -30,8 +32,8 @@ export class BotManager {
         try {
             this.bot = mineflayer.createBot({
                 host: process.env.MINECRAFT_HOST,
-                port: parseInt(process.env.MINECRAFT_PORT || '25565'),
-                username: process.env.BOT_USERNAME || 'Elio',
+                port: parseInt(process.env.MINECRAFT_PORT!),
+                username: process.env.BOT_USERNAME || 'Elio',  
                 version: process.env.MINECRAFT_VERSION,
             });
 
@@ -57,6 +59,7 @@ export class BotManager {
                 console.warn('[DEBUG] Bot disconnected from server');
                 console.warn(`[DEBUG] Disconnect reason: ${reason || 'unknown'}`);
                 console.warn(`[DEBUG] Bot connected before disconnect? ${this.bot?.entity !== undefined}`);
+                this.cleanupAttackIntervals();
                 this.bot = null;
                 this.connectTime = null;
                 this.io.emit('bot_disconnected', { timestamp: Date.now() });
@@ -158,6 +161,11 @@ export class BotManager {
                 this.fleeFromHostiles(16);
             }
         }
+    }
+
+    private cleanupAttackIntervals() {
+        Object.values(this.attackIntervals).forEach(clearInterval);
+        this.attackIntervals = {};
     }
 
     // Public methods
@@ -495,8 +503,7 @@ export class BotManager {
         }
     }
 
-
-    async mineBlocks(blockType: string, count: number = 1): Promise<any> {
+    async mineBlocks(blockType: string, count: number, preferredTool?: string): Promise<any> {
         if (!this.bot) throw new Error("Bot not connected");
 
         const startTime = Date.now();
@@ -522,44 +529,57 @@ export class BotManager {
                 });
 
                 if (!block) {
-                    break; // nothing nearby
+                    break;
                 }
 
                 blocksFound.push({ position: block.position, name: block.name });
 
-                // 🚶 Move closer if too far away
-                if (block.position.distanceTo(this.bot.entity.position) > 4) {
-                    await this.moveTo(block.position.x, block.position.y, block.position.z);
+                // 🚶 Move close with a GoalNear to ensure reachability
+                const { GoalNear } = require('mineflayer-pathfinder').goals;
+                if (block.position.distanceTo(this.bot.entity.position) > 2.2) {
+                    try {
+                        await this.bot.pathfinder.goto(new GoalNear(block.position.x, block.position.y, block.position.z, 1));
+                    } catch (e) {
+                        // Can't reach this block, try another
+                        continue;
+                    }
                 }
 
-                // 🔨 Equip best tool
-                const tool = this.getBestTool(block, mcData);
+                // Re-fetch the block after moving (it could have changed)
+                const target = this.bot.blockAt(block.position);
+                if (!target || target.type !== blockId) {
+                    continue;
+                }
+
+                // 🔨 Equip best tool for the block
+                let tool = this.getBestTool(target, mcData, preferredTool);
                 if (tool) {
-                    await this.bot.equip(tool, "hand");
-                } else {
-                    console.warn(
-                        `⚠️ No suitable tool found for ${block.name}, mining may fail.`
-                    );
+                    try { await this.bot.equip(tool, "hand"); } catch {}
                 }
 
                 // ⛏️ Check if block is mineable
-                if (!this.bot.canDigBlock(block)) {
+                if (!this.bot.canDigBlock(target)) {
                     return {
                         mined,
                         requested: count,
                         blocksFound,
                         timeElapsed: Date.now() - startTime,
-                        success: false,
-                        error: `Cannot dig block: ${block.name} with current tool`,
+                        success: mined > 0,
+                        error: `Cannot dig block: ${target.name} with current tool`,
                     };
                 }
 
                 // 🪓 Mine it
-                await this.bot.dig(block);
+                await this.bot.dig(target);
                 mined++;
 
                 this.updateLastActivity();
                 this.io.emit("bot_state", this.getBotState());
+
+                // Time cap: 30 seconds per request
+                if (Date.now() - startTime > 30000) {
+                    break;
+                }
             }
 
             return {
@@ -584,39 +604,62 @@ export class BotManager {
     /**
      * Selects the best tool available in inventory for the given block.
      */
-    getBestTool(block: any, mcData: any) {
+    getBestTool(block: any, mcData: any, preferredTool?: string) {
         if (!block) return null;
 
-        const tools = this.bot?.inventory.items().filter((item) =>
+        const items = this.bot?.inventory.items() || [];
+
+        // Try to use mcData.harvestTools if available
+        const blockInfo = mcData.blocks[block.type];
+        if (blockInfo && blockInfo.harvestTools) {
+            // harvestTools is a map of toolItemId -> true
+            let candidate = items.find(i => blockInfo.harvestTools[i.type]);
+            // If user hinted a preferred tool, bias toward it when compatible
+            if (preferredTool) {
+                const lowered = preferredTool.toLowerCase();
+                const hinted = items.find(i => blockInfo.harvestTools[i.type] && i.name.includes(lowered));
+                if (hinted) candidate = hinted;
+            }
+            if (candidate) return candidate;
+        }
+
+        // Fallback heuristics by block/material name
+        const tools = items.filter((item) =>
             item.name.includes("pickaxe") ||
             item.name.includes("shovel") ||
             item.name.includes("axe")
         );
+        if (tools.length === 0) return null;
 
-        if (tools?.length === 0) return null;
-
-        // Example: prefer pickaxe for stone/cobblestone, axe for logs, shovel for sand/gravel
-        if (block.name.includes("stone") || block.name.includes("ore")) {
-            return tools?.find((t) => t.name.includes("pickaxe")) || null;
-        }
-        if (block.name.includes("log")) {
-            return tools?.find((t) => t.name.includes("axe")) || null;
-        }
-        if (block.name.includes("sand") || block.name.includes("gravel") || block.name.includes("dirt")) {
-            return tools?.find((t) => t.name.includes("shovel")) || null;
+        // If preferredTool provided, try that first
+        if (preferredTool) {
+            const lowered = preferredTool.toLowerCase();
+            const hinted = tools.find(t => t.name.includes(lowered));
+            if (hinted) return hinted;
         }
 
-        if (!tools || tools.length === 0) return null;
+        const name = (block.name || "").toLowerCase();
+        const material = (block.material || "").toLowerCase();
 
-        return tools[0];
+        // Prefer axe for logs/wood
+        if (name.includes("log") || name.includes("wood") || material.includes("wood") || material.includes("plant")) {
+            return tools.find(t => t.name.includes("axe")) || null;
+        }
+        // Prefer shovel for soft blocks
+        if (name.includes("sand") || name.includes("gravel") || name.includes("dirt") || material.includes("dirt")) {
+            return tools.find(t => t.name.includes("shovel")) || null;
+        }
+        // Default to pickaxe for stone/ore
+        if (name.includes("stone") || name.includes("ore") || material.includes("stone")) {
+            return tools.find(t => t.name.includes("pickaxe")) || null;
+        }
+
+        // Fallback to any tool
+        return tools[0] || null;
     }
-
-
 
     async collectItems(itemType?: string, radius: number = 16): Promise<any[]> {
         if (!this.bot) throw new Error('Bot not connected');
-
-
 
         const items = Object.values(this.bot.entities)
             .filter(entity => {
@@ -646,6 +689,7 @@ export class BotManager {
 
     async placeBlock(
         blockType: string,
+        count: number,
         x?: number,
         y?: number,
         z?: number,
@@ -746,6 +790,7 @@ export class BotManager {
             return { success: false, error: error.message, blockType };
         }
     }
+
     async useItem(x?: number, y?: number, z?: number, item?: string, face: string = 'top'): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
 
@@ -829,7 +874,6 @@ export class BotManager {
         }
     }
 
-
     getRecipes(item?: string): any[] {
         if (!this.bot) throw new Error('Bot not connected');
 
@@ -843,8 +887,34 @@ export class BotManager {
         return Object.values(mcData.recipes || {});
     }
 
+    private async equipBestSwordIfAvailable(): Promise<boolean> {
+        if (!this.bot) return false;
+        try {
+          const mcData = require('minecraft-data')(this.bot.version);
+          const priority = [
+            'netherite_sword',
+            'diamond_sword',
+            'iron_sword',
+            'stone_sword',
+            'golden_sword',
+            'wooden_sword'
+          ];
+          for (const name of priority) {
+            const def = mcData.itemsByName[name];
+            if (!def) continue;
+            const item = this.bot.inventory.items().find(i => i.type === def.id);
+            if (item) {
+              if (this.bot.heldItem?.type === item.type) return true;
+              await this.bot.equip(item, 'hand');
+              return true;
+            }
+          }
+        } catch {}
+        return false;
+      }
+
     // Combat methods
-    async attackEntity(entityId: number, continuous: boolean = false): Promise<any> {
+    async attackEntity(entityId: number, continuous: boolean = true): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
 
         const entity = this.bot.entities[entityId];
@@ -853,21 +923,57 @@ export class BotManager {
         }
 
         try {
+            await this.equipBestSwordIfAvailable();
             if (continuous) {
-                this.bot.attack(entity);
+                // Prevent multiple intervals for the same entity
+                if (this.attackIntervals[entityId]) {
+                    clearInterval(this.attackIntervals[entityId]);
+                    delete this.attackIntervals[entityId];
+                }
 
-                const attackInterval = setInterval(() => {
-                    const currentEntity = this.bot!.entities[entityId];
+
+                this.attackIntervals[entityId] = setInterval(async () => {
+                    const bot = this.bot!;
+                    const currentEntity = bot.entities[entityId];
+                  
+                    // Stop if gone/invalid/dead
                     if (
-                        !currentEntity ||
-                        currentEntity.position.distanceTo(this.bot!.entity.position) > 8 ||
-                        (currentEntity.health !== undefined && currentEntity.health <= 0)
+                      !currentEntity ||
+                      (currentEntity as any).isValid === false ||
+                      (currentEntity.health !== undefined && currentEntity.health <= 0)
                     ) {
-                        clearInterval(attackInterval);
-                        return;
+                      clearInterval(this.attackIntervals[entityId]);
+                      delete this.attackIntervals[entityId];
+                      return;
                     }
-                    this.bot!.attack(currentEntity);
-                }, 500);
+                  
+                    try {
+                      const dist = currentEntity.position.distanceTo(bot.entity.position);
+                  
+                      if (dist > 4) {
+                        // Approach the target until within melee range
+                        const { GoalNear } = require('mineflayer-pathfinder').goals;
+                        bot.pathfinder.setGoal(
+                          new GoalNear(
+                            currentEntity.position.x,
+                            currentEntity.position.y,
+                            currentEntity.position.z,
+                            2
+                          ),
+                          true // dynamic goal
+                        );
+                        return;
+                      }
+                  
+                      // In melee range: stop moving, face target, and attack
+                      bot.pathfinder.setGoal(null);
+                      try {
+                        const h = (currentEntity as any).height ?? 1.6;
+                        await bot.lookAt(currentEntity.position.offset(0, h / 2, 0));
+                      } catch {}
+                      bot.attack(currentEntity);
+                    } catch {}
+                  }, 500);
             } else {
                 this.bot.attack(entity);
             }
@@ -884,89 +990,70 @@ export class BotManager {
         }
     }
 
-    async attackNearestHostile(mobType?: string, radius: number = 16, continuous: boolean = false): Promise<any> {
+    async attackNearestHostile(mobType?: string, radius: number = 16, continuous: boolean = true): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
 
-        const hostileMobs = ['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'pillager'];
+        const wanted = mobType ? mobType.toLowerCase() : undefined;
         const entities = Object.values(this.bot.entities)
             .filter(entity => {
-                if (entity.type !== 'mob') return false;
+                if (entity.type !== 'mob' && !(((entity as any).kind || '').toString().toLowerCase().includes('hostile'))) return false;
+                if (!entity.position) return false;
                 if (entity.position.distanceTo(this.bot!.entity.position) > radius) return false;
-                if (mobType && entity.name !== mobType) return false;
-                if (!mobType && !hostileMobs.includes(entity.name || '')) return false;
-                return true;
+                const name = ((entity.name || entity.displayName || '') as string).toLowerCase().replace(/^minecraft:/, '');
+                if (wanted) return name.includes(wanted);
+                return this.isHostileEntity(entity);
             })
             .sort((a, b) =>
                 a.position.distanceTo(this.bot!.entity.position) - b.position.distanceTo(this.bot!.entity.position)
             );
 
         if (entities.length === 0) {
+            // Debug snapshot to help diagnose detection issues
+            const snapshot = Object.values(this.bot.entities)
+                .filter(e => (e as any).type === 'mob')
+                .map(e => ({ id: e.id, name: (e.name || e.displayName || '').toString(), kind: (e as any).kind, dist: e.position?.distanceTo(this.bot!.entity.position) }))
+                .sort((a, b) => (a.dist || 9999) - (b.dist || 9999))
+                .slice(0, 10);
+            console.warn('[combat] No hostiles found. Nearby mobs snapshot:', snapshot);
+            return { target: null, attacked: false, reason: 'No hostiles found', nearbyMobs: snapshot };
+        }
+
+        const target = this.bot.nearestEntity(
+            e =>
+              e &&
+              e !== this.bot!.entity &&
+              e.position &&
+              this.isHostileEntity(e) &&
+              e.position.distanceTo(this.bot!.entity.position) <= radius
+          );
+          
+          if (!target) {
+            // Build the same snapshot you already have above or return a simple not-found
             return { target: null, attacked: false, reason: 'No hostiles found' };
-        }
-
-        const target = entities[0];
-        const result = await this.attackEntity(target.id, continuous);
-
-        return {
+          }
+          
+          const result = await this.attackEntity(target.id, continuous);
+          
+          return {
+            ...result,
             target: {
-                id: target.id,
-                type: target.name,
-                distance: target.position.distanceTo(this.bot.entity.position)
+              id: target.id,
+              type: ((target.name || target.displayName || 'unknown') as string)
+                .toLowerCase()
+                .replace(/^minecraft:/, ''),
+              distance: target.position.distanceTo(this.bot.entity.position)
             },
-            ...result
-        };
+            targetName: result.target
+          };
     }
 
-    setDefensiveMode(enabled: boolean, radius: number = 8, aggressive: boolean = false): any {
-        if (!this.bot) throw new Error('Bot not connected');
-
-        this.defensiveMode = enabled;
-        this.defensiveRadius = radius;
-        this.isAggressive = aggressive;
-
-        if (this._defensiveHandler) {
-            // remove old handler if already active
-            this.bot.removeListener('physicsTick', this._defensiveHandler);
-            this._defensiveHandler = null;
-        }
-
-        if (enabled) {
-            this._defensiveHandler = async () => {
-                try {
-                    const threats = this.getNearbyThreats(radius);
-
-                    if (threats.length === 0) return;
-
-                    const threatLevel = this.assessThreatLevel(threats);
-
-                    if (aggressive) {
-                        // Aggressive: attack nearest hostile
-                        const nearest = threats[0];
-                        await this.attackEntity(nearest.id, true);
-                    } else {
-                        // Defensive: flee instead of attacking
-                        if (threatLevel === 'HIGH' || threatLevel === 'MEDIUM') {
-                            await this.fleeFromHostiles(radius * 2);
-                        } else {
-                            // Raise shield if available
-                            await this.useShield(true);
-                        }
-                    }
-                } catch (err) {
-                    this.bot?.emit('error', new Error(`Defensive handler error: ${err}`));
-                }
-            };
-
-            this.bot.on('physicsTick', this._defensiveHandler);
-        }
-
-        return {
-            defensiveMode: this.defensiveMode,
-            radius: this.defensiveRadius,
-            aggressive: this.isAggressive
-        };
+    private isHostileEntity(entity: any): boolean {
+        if (!entity) return false;
+        // Prefer kind when available
+        if (typeof (entity as any).kind === 'string' && (entity as any).kind.toLowerCase().includes('hostile')) return true;
+        const name = ((entity.name || entity.displayName || '') as string).toLowerCase().replace(/^minecraft:/, '');
+        return this.HOSTILE_MOBS.includes(name);
     }
-
 
     async fleeFromHostiles(distance: number = 16, direction?: string): Promise<any> {
         if (!this.bot) throw new Error('Bot not connected');
@@ -1031,21 +1118,19 @@ export class BotManager {
         }
     }
 
-
     getNearbyThreats(radius: number = 16): any[] {
         if (!this.bot) return [];
 
-        const hostileMobs = ['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'pillager'];
-
         return Object.values(this.bot.entities)
             .filter(entity => {
-                if (entity.type !== 'mob') return false;
+                if (entity.type !== 'mob' && !(((entity as any).kind || '').toString().toLowerCase().includes('hostile'))) return false;
+                if (!entity.position) return false;
                 if (entity.position.distanceTo(this.bot!.entity.position) > radius) return false;
-                return hostileMobs.includes(entity.name || '');
+                return this.isHostileEntity(entity);
             })
             .map(entity => ({
                 id: entity.id,
-                type: entity.name || 'unknown',
+                type: (entity.name || entity.displayName || 'unknown').toString().toLowerCase(),
                 position: {
                     x: entity.position.x,
                     y: entity.position.y,
@@ -1078,6 +1163,59 @@ export class BotManager {
             threats,
             defensiveMode: this.defensiveMode,
             threatLevel: this.assessThreatLevel(threats)
+        };
+    }
+
+    setDefensiveMode(enabled: boolean, radius: number = 8, aggressive: boolean = false): any {
+        if (!this.bot) throw new Error('Bot not connected');
+
+        this.defensiveMode = enabled;
+        this.defensiveRadius = radius;
+        this.isAggressive = aggressive;
+
+        if (this._defensiveHandler) {
+            // remove old handler if already active
+            this.bot.removeListener('physicsTick', this._defensiveHandler);
+            this._defensiveHandler = null;
+        }
+
+        if (enabled) {
+            this._defensiveHandler = async () => {
+                try {
+                    const threats = this.getNearbyThreats(radius);
+
+                    if (threats.length === 0) return;
+
+                    const threatLevel = this.assessThreatLevel(threats);
+
+                    if (aggressive) {
+                        // Aggressive: attack nearest hostile
+                        const nearest = threats[0];
+                        // Avoid stacking intervals by calling with continuous=true only if not already attacking
+                        if (!this.attackIntervals[nearest.id]) {
+                            await this.attackEntity(nearest.id, true);
+                        }
+                    } else {
+                        // Defensive: flee instead of attacking
+                        if (threatLevel === 'HIGH' || threatLevel === 'MEDIUM') {
+                            await this.fleeFromHostiles(radius * 2);
+                        } else {
+                            // Raise shield if available
+                            await this.useShield(true);
+                        }
+                    }
+                } catch (err) {
+                    this.bot?.emit('error', new Error(`Defensive handler error: ${err}`));
+                }
+            };
+
+            this.bot.on('physicsTick', this._defensiveHandler);
+        }
+
+        return {
+            defensiveMode: this.defensiveMode,
+            radius: this.defensiveRadius,
+            aggressive: this.isAggressive
         };
     }
 }

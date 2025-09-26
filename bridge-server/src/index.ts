@@ -67,5 +67,5 @@ class MinecraftBotAPI {
 
 // Start the server
 const botAPI = new MinecraftBotAPI();
-const port = parseInt(process.env.PORT || '3000');
+const port = parseInt(process.env.PORT || '3001');
 botAPI.start(port);

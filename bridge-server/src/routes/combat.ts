@@ -12,35 +12,53 @@ export function combatRoutes(botManager: BotManager, io: SocketIOServer): Router
      * @access Public
      */
     router.post('/attack', asyncHandler(async (req: Request, res: Response) => {
-        const { entityId, continuous = false } = req.body;
-
-        if (!entityId) {
-            return res.status(400).json({ error: 'Entity ID is required' });
-        }
-
+        const { entityId, continuous = true, mobType, radius = 16 } = req.body;
+      
         if (!botManager.isConnected()) {
-            return res.status(400).json({ error: 'Bot not connected' });
+          return res.status(400).json({ error: 'Bot not connected' });
         }
-
+      
+        // If 'any' (or missing/undefined), fall back to nearest hostile
+        if (entityId === 'any' || entityId === undefined || entityId === null) {
+          const result = await botManager.attackNearestHostile(mobType, radius, continuous);
+          io.emit('nearest_attack', { mobType, radius, continuous, result });
+      
+          if (result.target) {
+            return res.json({
+              success: true,
+              message: `${continuous ? 'Started attacking' : 'Attacked'} nearest ${result.target.type}`,
+              target: result.target,
+              continuous,
+              details: result
+            });
+          } else {
+            return res.json({
+              success: false,
+              message: `No ${mobType || 'hostile mobs'} found within radius ${radius}`,
+              mobType,
+              radius
+            });
+          }
+        }
+      
+        // Otherwise, attack specific entityId
         const result = await botManager.attackEntity(entityId, continuous);
         io.emit('attack_performed', { entityId, continuous, result });
-
         res.json({
-            success: true,
-            message: `${continuous ? 'Started attacking' : 'Attacked'} entity ${entityId}`,
-            entityId,
-            continuous,
-            details: result
+          success: true,
+          message: `${continuous ? 'Started attacking' : 'Attacked'} entity ${entityId}`,
+          entityId,
+          continuous,
+          details: result
         });
-    }));
-
+      }));
     /**
      * @route POST /attackNearest
      * @desc Attack the nearest hostile mob
      * @access Public
      */
     router.post('/attackNearest', asyncHandler(async (req: Request, res: Response) => {
-        const { mobType, radius = 16, continuous = false } = req.body;
+        const { mobType, radius = 16, continuous = true } = req.body;
 
         if (!botManager.isConnected()) {
             return res.status(400).json({ error: 'Bot not connected' });

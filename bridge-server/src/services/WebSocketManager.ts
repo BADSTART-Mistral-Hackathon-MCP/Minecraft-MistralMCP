@@ -113,8 +113,6 @@ export class WebSocketManager {
             }
         }, 30000);
     }
-
-    // Public methods for broadcasting events
     broadcastToAll(event: string, data: any): void {
         this.io.emit(event, data);
     }
